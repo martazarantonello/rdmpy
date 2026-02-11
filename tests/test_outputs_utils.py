@@ -98,6 +98,7 @@ def test_calculate_incident_summary_stats_k0(sample_complete_df):
     
     ## Peak should be 75 minutes (from 14th record)
     assert '75.0 minutes' in result['Peak Delay Event']
+    assert isinstance(result['Peak Delay Event'], str) # 'XX minutes at DATE TIME (TYPE)'
 
 
 # ==============================================================================
