@@ -343,7 +343,7 @@ def _get_station_name_from_reference(incident_section_code):
         return None
     
     try:
-        from data.reference import reference_files
+        from demo.data.reference import reference_files
         with open(reference_files["station codes"], 'r') as f:
             station_codes_data = json.load(f)
         
@@ -488,7 +488,7 @@ def _calculate_delayed_train_metrics(df, analysis_datetime, analysis_end):
 def _load_station_coordinates_from_json():
     """Load and validate station coordinates from reference JSON file."""
     try:
-        from data.reference import reference_files
+        from demo.data.reference import reference_files
         import json
         
         file_path = reference_files["all dft categories"]
@@ -629,7 +629,7 @@ def _get_incident_location_coordinates(incident_section_code):
     
     if incident_section_code:
         try:
-            from data.reference import reference_files
+            from demo.data.reference import reference_files
             import json
             
             with open(reference_files["station codes"], 'r') as f:
@@ -1186,7 +1186,7 @@ def _build_legend_and_info_boxes(fig, ax_severity, timeline_axes, df, unique_dat
                     bbox=dict(boxstyle='round,pad=0.8', facecolor='white', edgecolor='black', alpha=0.9))
 
 
-def _calculate_incident_summary_stats(df, delay_data_all, unique_dates, files_processed, files_with_data, incident_number, num_days):
+def calculate_incident_summary_stats(df, delay_data_all, unique_dates, files_processed, files_with_data, incident_number, num_days):
     """
     Calculate final summary statistics for the incident.
     
@@ -1402,7 +1402,7 @@ def aggregate_view_multiday(incident_number, start_date):
     plt.show()
     
     # Step 5: Calculate and return summary statistics
-    summary = _calculate_incident_summary_stats(df, delay_data_all, unique_dates, files_processed, 
+    summary = calculate_incident_summary_stats(df, delay_data_all, unique_dates, files_processed, 
                                                 files_with_data, incident_number, num_days)
     
     return summary
