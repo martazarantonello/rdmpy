@@ -35,6 +35,7 @@ from rdmpy.outputs.analysis_tools import (
     _aggregate_time_view_data,
     _create_time_view_markers,
     _finalize_time_view_map,
+    create_time_view_html,
 )
 
 
@@ -426,6 +427,28 @@ def test_train_view_no_incidents_on_date_returns_message(mock_display, train_jou
     assert isinstance(result, str)
     assert 'no incidents' in result.lower()
 
+# FIXTURES for train_view_2 tests
+
+@pytest.fixture
+def sample_service_reliability_df():
+    """Create sample data for train_view_2 testing with known reliability metrics."""
+    return pd.DataFrame({
+        'TRAIN_SERVICE_CODE': ['SVC001'] * 10,
+        'STANOX': ['12345', '12345', '12345', '12346', '12346', '12346', '12347', '12347', '12347', '12348'],
+        'PFPI_MINUTES': [0.0, 5.0, 10.0, 0.0, 15.0, 20.0, 0.0, 0.0, 25.0, 10.0],
+        'INCIDENT_REASON': ['OnTime', 'Delay', 'Delay', 'OnTime', 'Delay', 'Delay', 'OnTime', 'OnTime', 'Delay', 'Delay'],
+    })
+
+@pytest.fixture
+def sample_single_station_reliability_df():
+    """Create sample data for train_view_2 testing with single station focus."""
+    return pd.DataFrame({
+        'TRAIN_SERVICE_CODE': ['SVC002'] * 3,
+        'STANOX': ['12345', '12345', '12345'],
+        'PFPI_MINUTES': [0.0, 5.0, 10.0],
+        'INCIDENT_REASON': ['OnTime', 'Delay', 'Delay'],
+    })
+
 
 # TESTS FOR train_view_2 (not included in general report of the tool, but present in the code)
 
@@ -512,9 +535,7 @@ def test_train_view_2_empty_service_stanox(mock_open, mock_print, sample_service
     assert isinstance(result, pd.DataFrame)
 
 
-# ==============================================================================
-# TESTS FOR plot_reliability_graphs FUNCTION
-# ==============================================================================
+# TESTS FOR plot_reliability_graphs FUNCTION (still in train view)
 
 @patch('builtins.print')
 @patch('matplotlib.pyplot.show')
@@ -536,176 +557,228 @@ def test_plot_reliability_graphs_runs_without_error(mock_plt_show, mock_print, s
 
 
 # ==============================================================================
-# TIME VIEW HELPER FUNCTION TESTS
+# TIME VIEW FUNCTION TESTS
 # ==============================================================================
+
+# Fixtures for time view tests
 
 @pytest.fixture
 def sample_time_view_data():
-    """Create sample time view incident data."""
-    dates = pd.date_range('2024-01-15 08:00', periods=10, freq='H')
+    """
+    Create sample time view incident data for testing.
+    
+    This fixture includes:
+    - Multiple dates (2024-01-15 and 2024-01-16) for testing date filtering
+    - Multiple stations with varying incident counts
+    - Varying PFPI minutes for testing color coding (green, yellow, orange, red, dark red, violet)
+    - Multiple incident reasons for testing top reasons aggregation
+    """
+    # Data for 2024-01-15 (10 incidents across 4 stations)
+    date_2024_01_15 = [
+        ('2024-01-15 08:30:00', '12345', 1001, 'TH', 15),
+        ('2024-01-15 09:00:00', '12346', 1002, 'TG', 10),
+        ('2024-01-15 09:45:00', '12345', 1003, 'TH', 25),
+        ('2024-01-15 10:30:00', '12347', 1004, 'XA', 35),  # 31-60 min range
+        ('2024-01-15 11:00:00', '12345', 1005, 'TG', 20),
+        ('2024-01-15 11:30:00', '12346', 1006, 'M8', 50),  # 31-60 min range
+        ('2024-01-15 12:00:00', '12345', 1007, 'TH', 18),
+        ('2024-01-15 12:30:00', '12348', 1008, 'QM', 80),  # 61-120 min range
+        ('2024-01-15 13:00:00', '12345', 1009, 'TG', 28),
+        ('2024-01-15 13:30:00', '12346', 1010, 'M8', 14),
+    ]
+    
+    # Data for 2024-01-16 (6 incidents across 3 stations - for testing no data on other dates)
+    date_2024_01_16 = [
+        ('2024-01-16 08:00:00', '12345', 1011, 'TG', 12),
+        ('2024-01-16 09:00:00', '12346', 1012, 'TH', 7),
+        ('2024-01-16 10:00:00', '12346', 1013, 'TG', 19),
+    ]
+    
+    all_records = date_2024_01_15 + date_2024_01_16
+    
     return pd.DataFrame({
-        'INCIDENT_START_DATETIME': [d.strftime('%Y-%m-%d %H:%M:%S') for d in dates],
-        'STANOX': ['12345', '12346', '12345', '12347', '12345', '12346', '12345', '12348', '12345', '12346'],
-        'INCIDENT_NUMBER': [1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009, 1010],
-        'INCIDENT_REASON': ['Signal Failure', 'Track Obstruction', 'Signal Failure', 'Traction Loss', 'Track Obstruction'] * 2,
-        'PFPI_MINUTES': [15, 10, 25, 30, 20, 12, 18, 22, 28, 14],
+        'INCIDENT_START_DATETIME': [r[0] for r in all_records],
+        'STANOX': [r[1] for r in all_records],
+        'INCIDENT_NUMBER': [r[2] for r in all_records],
+        'INCIDENT_REASON': [r[3] for r in all_records],
+        'PFPI_MINUTES': [r[4] for r in all_records],
     })
-
 
 @pytest.fixture
 def sample_time_view_stations_ref():
-    """Create sample station reference data for time view."""
+    """
+    Create sample station reference data for time view.
+    Includes latitude/longitude for UK stations.
+    """
     return [
-        {'stanox': 12345, 'station_name': 'Station A', 'latitude': 51.5074, 'longitude': -0.1278},
-        {'stanox': 12346, 'station_name': 'Station B', 'latitude': 53.4808, 'longitude': -2.2426},
-        {'stanox': 12347, 'station_name': 'Station C', 'latitude': 52.5200, 'longitude': 13.4050},
-        {'stanox': 12348, 'station_name': 'Station D', 'latitude': 48.8566, 'longitude': 2.3522},
+        {'stanox': 12345, 'station_name': 'London Kings Cross', 'latitude': 51.5307, 'longitude': -0.1234},
+        {'stanox': 12346, 'station_name': 'Manchester Piccadilly', 'latitude': 53.4808, 'longitude': -2.2426},
+        {'stanox': 12347, 'station_name': 'Birmingham New Street', 'latitude': 52.5078, 'longitude': -1.9043},
+        {'stanox': 12348, 'station_name': 'Leeds City', 'latitude': 53.7949, 'longitude': -1.7477},
     ]
 
+# Tests for _print_date_statistics function (helper for time view, which prints summary statistics for a given date)
 
-# ==============================================================================
-# FIXTURES FOR TRAIN_VIEW AND TRAIN_VIEW_2 TESTS
-# ==============================================================================
-
-@pytest.fixture
-def sample_train_view_df():
-    """Create sample data for train_view testing with known OD pairs and incidents."""
-    dates = pd.date_range('2024-01-15 08:00', periods=10, freq='H')
-    return pd.DataFrame({
-        'PLANNED_ORIGIN_LOCATION_CODE': ['LKX', 'LKX', 'LKX', 'EDI', 'EDI', 'EDI', 'LKX', 'LKX', 'MAN', 'MAN'],
-        'PLANNED_DEST_LOCATION_CODE': ['EDI', 'EDI', 'EDI', 'LKX', 'LKX', 'LKX', 'MAN', 'MAN', 'LKX', 'LKX'],
-        'TRAIN_SERVICE_CODE': ['EK001', 'EK001', 'EK002', 'EK003', 'EK003', 'EK004', 'EK005', 'EK005', 'EK006', 'EK006'],
-        'STANOX': ['12345', '12346', '12347', '12345', '12348', '12345', '12346', '12347', '12345', '12349'],
-        'PLANNED_ORIGIN_GBTT_DATETIME': ['08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00'],
-        'PLANNED_DEST_GBTT_DATETIME': ['10:30', '11:30', '12:30', '13:30', '14:30', '15:30', '16:30', '17:30', '18:30', '19:30'],
-        'PLANNED_CALLS': ['0800', '0900', '1000', '1100', '1200', '1300', '1400', '1500', '1600', '1700'],
-        'ACTUAL_CALLS': ['0815', '0920', '1015', '1115', '1220', '1330', '1415', '1520', '1620', '1735'],
-        'PFPI_MINUTES': [15.0, 20.0, 15.0, 15.0, 20.0, 30.0, 15.0, 20.0, 20.0, 35.0],
-        'INCIDENT_REASON': ['Signal Failure', 'Track Defect', 'Signal Failure', 'Traction Loss', 'Points Failure', 
-                           'Signal Failure', 'Track Defect', 'Signalling Issue', 'Signal Failure', 'Track Defect'],
-        'INCIDENT_NUMBER': [1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009, 1010],
-        'EVENT_TYPE': ['D', 'D', 'D', 'D', 'D', 'D', 'D', 'D', 'D', 'D'],
-        'SECTION_CODE': ['12345:12346', '12346:12347', '12347:12348', '12345:12346', '12346:12348', 
-                        '12345:12348', '12346:12347', '12347:12345', '12345:12349', '12349:12345'],
-        'DELAY_DAY': ['01-JAN-2024', '01-JAN-2024', '01-JAN-2024', '01-JAN-2024', '01-JAN-2024',
-                     '01-JAN-2024', '01-JAN-2024', '01-JAN-2024', '01-JAN-2024', '01-JAN-2024'],
-        'EVENT_DATETIME': ['15-JAN-2024 08:15', '15-JAN-2024 09:20', '15-JAN-2024 10:15', '15-JAN-2024 11:15', '15-JAN-2024 12:20',
-                          '15-JAN-2024 13:30', '15-JAN-2024 14:15', '15-JAN-2024 15:20', '15-JAN-2024 16:20', '15-JAN-2024 17:35'],
-        'INCIDENT_START_DATETIME': ['2024-01-15 08:00', '2024-01-15 09:00', '2024-01-15 10:00', '2024-01-15 11:00', '2024-01-15 12:00',
-                                   '2024-01-15 13:00', '2024-01-15 14:00', '2024-01-15 15:00', '2024-01-15 16:00', '2024-01-15 17:00'],
-        'ENGLISH_DAY_TYPE': ['Weekday', 'Weekday', 'Weekday', 'Weekday', 'Weekday', 'Weekday', 'Weekday', 'Weekday', 'Weekday', 'Weekday'],
-        'STATION_ROLE': ['O', 'I', 'D', 'O', 'I', 'D', 'O', 'I', 'O', 'D'],
-        'DFT_CATEGORY': ['Cat1', 'Cat1', 'Cat1', 'Cat1', 'Cat1', 'Cat1', 'Cat1', 'Cat1', 'Cat1', 'Cat1'],
-        'PLATFORM_COUNT': [5, 5, 5, 5, 5, 5, 5, 5, 4, 4],
-        'DATASET_TYPE': ['Delay', 'Delay', 'Delay', 'Delay', 'Delay', 'Delay', 'Delay', 'Delay', 'Delay', 'Delay'],
-        'WEEKDAY': [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-        'DAY': [15, 15, 15, 15, 15, 15, 15, 15, 15, 15],
-    })
-    # OD_PAIR will be added automatically in train_view
-
-
-@pytest.fixture
-def sample_service_reliability_df():
-    """Create sample data for train_view_2 testing with known reliability metrics."""
-    return pd.DataFrame({
-        'TRAIN_SERVICE_CODE': ['SVC001'] * 10,
-        'STANOX': ['12345', '12345', '12345', '12346', '12346', '12346', '12347', '12347', '12347', '12348'],
-        'PFPI_MINUTES': [0.0, 5.0, 10.0, 0.0, 15.0, 20.0, 0.0, 0.0, 25.0, 10.0],
-        'INCIDENT_REASON': ['OnTime', 'Delay', 'Delay', 'OnTime', 'Delay', 'Delay', 'OnTime', 'OnTime', 'Delay', 'Delay'],
-    })
-
-
-@pytest.fixture
-def sample_single_station_reliability_df():
-    """Create sample data for train_view_2 testing with single station focus."""
-    return pd.DataFrame({
-        'TRAIN_SERVICE_CODE': ['SVC002'] * 3,
-        'STANOX': ['12345', '12345', '12345'],
-        'PFPI_MINUTES': [0.0, 5.0, 10.0],
-        'INCIDENT_REASON': ['OnTime', 'Delay', 'Delay'],
-    })
-
-
-def test_print_date_statistics_with_data(sample_time_view_data, capsys):
-    """Test _print_date_statistics prints correct summary for a date with incidents."""
-    _print_date_statistics('2024-01-15', sample_time_view_data)
+def test_print_date_statistics(sample_time_view_data, capsys):
+    """
+    Test _print_date_statistics handles various data scenarios.
+    Capsys is useful for testing functions that communicate via print statements rather than return values. 
+    Without capsys, the print output would just go to your terminal—you wouldn't be able to verify it in your test assertions.
     
+    Tests:
+    - Prints correct summary for dates with incidents
+    - Handles empty datasets gracefully
+    - Handles dates with no matching incidents
+    """
+    # Test 1: Date with incidents - verify specific incident count and top reasons
+    _print_date_statistics('2024-01-15', sample_time_view_data)
     captured = capsys.readouterr()
-    # Should print the date and incident count
     assert '2024-01-15' in captured.out
-    assert 'incidents' in captured.out.lower()
-
-
-def test_print_date_statistics_empty_data(capsys):
-    """Test _print_date_statistics handles empty dataset."""
+    assert '10 incidents' in captured.out  # 2024-01-15 has exactly 10 incidents
+    assert 'Top reasons' in captured.out
+    # Verify top reasons from fixture: TH(3), TG(3), M8(2), XA(1), QM(1)
+    assert 'TH(3)' in captured.out
+    assert 'TG(3)' in captured.out
+    assert 'M8(2)' in captured.out
+    
+    # Test 2: Empty dataset instead of sample_time_view_data
     empty_df = pd.DataFrame({
         'INCIDENT_START_DATETIME': pd.Series([], dtype='object'),
         'STANOX': pd.Series([], dtype='object'),
         'INCIDENT_REASON': pd.Series([], dtype='object'),
         'PFPI_MINUTES': pd.Series([], dtype='float64'),
     })
-    
     _print_date_statistics('2024-01-15', empty_df)
-    
     captured = capsys.readouterr()
-    # Should print something for the date
-    assert '2024-01-15' in captured.out or 'No incidents' in captured.out
-
-
-def test_print_date_statistics_no_matching_date(sample_time_view_data, capsys):
-    """Test _print_date_statistics when no incidents match the date."""
-    _print_date_statistics('2024-02-01', sample_time_view_data)
+    assert 'No incidents' in captured.out
     
+    # Test 3: No matching date
+    _print_date_statistics('2024-02-01', sample_time_view_data) # this date doesn't exist in the sample data, so should trigger "no incidents" message
     captured = capsys.readouterr()
-    # Should indicate no incidents found
-    assert '2024-02-01' in captured.out
+    assert 'No incidents' in captured.out
 
 
-@patch('rdmpy.outputs.utils._load_station_coordinates')
-def test_load_station_coordinates_valid(mock_load, sample_time_view_stations_ref):
-    """Test _load_station_coordinates successfully loads station data."""
-    # Mock the return value
-    expected_result = {
-        '12345': [51.5074, -0.1278],
-        '12346': [53.4808, -2.2426],
-        '12347': [52.5200, 13.4050],
-    }
-    mock_load.return_value = expected_result
+# Tests for _create_time_view_markers function (helper for time view, which creates map markers for each station)
+
+@patch('folium.CircleMarker')
+def test_create_time_view_markers(mock_circle):
+    """
+    Test _create_time_view_markers marker creation, color grading, and radius scaling.
     
-    result = mock_load()
+    Tests:
+    - Adds CircleMarkers for each affected STANOX
+    - Applies correct color based on PFPI severity
+    - Scales radius by incident count
+    """
+    mock_map = MagicMock()
     
-    # Check structure: should be dict with STANOX as keys
-    assert isinstance(result, dict)
-    # STANOX should map to [lat, lon] pairs
-    for stanox, coords in result.items():
-        assert isinstance(coords, list)
-        assert len(coords) == 2
-
-
-@patch('rdmpy.outputs.utils._load_station_coordinates')
-def test_load_station_coordinates_missing_file(mock_load):
-    """Test _load_station_coordinates handles missing reference file gracefully."""
-    mock_load.return_value = {}
+    # Test 1: Multiple markers
+    _create_time_view_markers(
+        mock_map, 
+        affected_stanox={12345, 12346, 12347},
+        incident_counts={12345: 5, 12346: 3, 12347: 1},
+        total_pfpi={12345: 106, 12346: 36, 12347: 30},
+        stanox_to_coords={'12345': [51.5074, -0.1278], '12346': [53.4808, -2.2426], '12347': [52.5200, 13.4050]}
+    )
+    # Assert markers created with correct counts and verify color grading
+    assert mock_circle.call_count >= 3
     
-    result = mock_load()
-    # Should return empty dict on missing file
-    assert result == {}
+    # Test 2: Verify correct colors are applied to each severity range based on Test 1 data
+    # Station 12345: PFPI 106 (61-120 range) → Dark Red '#8B0000'
+    # Station 12346: PFPI 36 (31-60 range) → Red '#FF0000'
+    # Station 12347: PFPI 30 (0-30 range) → Dark Orange '#FF8C00'
+    
+    # Extract location-color pairs from each marker call
+    markers = {tuple(call[1].get('location', [])): call[1].get('fill_color', call[1].get('color', '')) 
+               for call in mock_circle.call_args_list}
+    
+    # Assert each station has the correct color for its severity
+    assert markers[(51.5074, -0.1278)] == '#8B0000', "Station 12345: expected #8B0000"
+    assert markers[(53.4808, -2.2426)] == '#FF0000', "Station 12346: expected #FF0000"
+    assert markers[(52.5200, 13.4050)] == '#FF8C00', "Station 12347: expected #FF8C00"
+    
+    # Test 3: Verify radius scaling with incident counts from Test 1 data
+    # Extract radii: station 12345 (5 incidents) should have larger radius than 12347 (1 incident)
+    radii = {tuple(call[1].get('location', [])): call[1].get('radius', 0) 
+             for call in mock_circle.call_args_list}
+    
+    radius_12345 = radii[(51.5074, -0.1278)]  # 5 incidents
+    radius_12346 = radii[(53.4808, -2.2426)]  # 3 incidents
+    radius_12347 = radii[(52.5200, 13.4050)]  # 1 incident
+    
+    # Verify radius scaling: more incidents = larger radius
+    assert radius_12345 > radius_12346 > radius_12347, "Radius should increase with incident count"
 
 
-def test_aggregate_time_view_data_valid_date(sample_time_view_data):
-    """Test _aggregate_time_view_data aggregates incidents correctly for a date."""
+# Tests for _finalize_time_view_map function (helper for time view, which finalizes the map by adding title, legend, and saving to file)
+
+@patch('folium.Element')
+def test_finalize_time_view_map(mock_element):
+    """
+    Test _finalize_time_view_map adds title, legend, and saves file.
+    
+    Tests:
+    - Adds title to the map via HTML element
+    - Adds legend to the map via HTML element
+    - Saves map to file with correct naming convention
+    """
+    mock_map = MagicMock()
+    
+    # Test all aspects in one call
+    _finalize_time_view_map(mock_map, '2024-01-15')
+    
+    # Verify title and legend are added
+    assert mock_map.get_root().html.add_child.called
+    calls = mock_map.get_root().html.add_child.call_count
+    assert calls >= 2  # At least title and legend
+    
+    # Verify file is saved
+    assert mock_map.save.called
+    call_args = mock_map.save.call_args
+    if call_args:
+        filename = call_args[0][0]
+        assert 'time_view_2024_01_15' in filename
+
+
+# Tests for _aggregate_time_view_data function (helper for time view, which aggregates incident counts and PFPI totals for a given date)
+
+def test_aggregate_time_view_data_calculates_correct_totals(sample_time_view_data):
+    """
+    Test _aggregate_time_view_data calculates correct incident counts and PFPI sums.
+    
+    Verification using fixture data:
+    - 2024-01-15: 10 incidents across 4 stations
+    - STANOX 12345: 5 incidents, PFPI total = 15+25+20+18+28 = 106 minutes
+    - STANOX 12346: 3 incidents, PFPI total = 10+50+14 = 74 minutes
+    """
     affected_stanox, incident_counts, total_pfpi = _aggregate_time_view_data('2024-01-15', sample_time_view_data)
     
-    # Should find affected STANOX
+    # Verify data structure
     assert affected_stanox is not None
-    assert len(affected_stanox) > 0
+    assert len(affected_stanox) == 4  # 4 stations affected
     
-    # Check aggregations - returns pandas Series, not dict
-    assert hasattr(incident_counts, 'get')  # Series has get method
-    assert hasattr(total_pfpi, 'get')
+    # Convert to int for comparison
+    stanox_list = [int(s) for s in affected_stanox]
+    assert sorted(stanox_list) == [12345, 12346, 12347, 12348]
     
-    # STANOX 12345 appears 5 times in sample data
-    assert 12345 in [int(s) for s in affected_stanox]
+    # Verify incident counts
+    count_12345 = incident_counts.get(12345) or incident_counts.get('12345')
+    count_12346 = incident_counts.get(12346) or incident_counts.get('12346')
+    count_12347 = incident_counts.get(12347) or incident_counts.get('12347')
+    count_12348 = incident_counts.get(12348) or incident_counts.get('12348')
+    
+    assert count_12345 == 5
+    assert count_12346 == 3
+    assert count_12347 == 1
+    assert count_12348 == 1
+    
+    # Verify PFPI totals
+    pfpi_12345 = total_pfpi.get(12345) or total_pfpi.get('12345')
+    pfpi_12346 = total_pfpi.get(12346) or total_pfpi.get('12346')
+    pfpi_12347 = total_pfpi.get(12347) or total_pfpi.get('12347')
+    assert pfpi_12345 == 106  # 15+25+20+18+28
+    assert pfpi_12346 == 74   # 10+50+14
+
 
 
 def test_aggregate_time_view_data_empty_date(sample_time_view_data):
@@ -716,131 +789,104 @@ def test_aggregate_time_view_data_empty_date(sample_time_view_data):
     assert affected_stanox is None
 
 
-def test_aggregate_time_view_data_stanox_grouping(sample_time_view_data):
-    """Test _aggregate_time_view_data correctly groups by STANOX."""
-    affected_stanox, incident_counts, total_pfpi = _aggregate_time_view_data('2024-01-15', sample_time_view_data)
-    
-    if affected_stanox is not None:
-        # Verify STANOX 12345 has correct incident count
-        # STANOX might be string or int in the Series, try both
-        stanox_12345_count = incident_counts.get(12345) or incident_counts.get('12345')
-        # STANOX 12345 appears 5 times in the sample data
-        assert stanox_12345_count == 5
-        
-        # Verify PFPI totals are sums
-        stanox_12345_pfpi = total_pfpi.get(12345) or total_pfpi.get('12345')
-        # Incidents for 12345: indices 0, 2, 4, 6, 8 with PFPI 15, 25, 20, 18, 28
-        assert stanox_12345_pfpi == 106
+# INTEGRATION TESTS FOR create_time_view_html (calling main create_time_view_html function, no helpers)
 
-
-
+@patch('rdmpy.outputs.analysis_tools._load_station_coordinates')
+@patch('folium.Map')
 @patch('folium.CircleMarker')
-def test_create_time_view_markers_adds_markers(mock_circle):
-    """Test _create_time_view_markers adds CircleMarkers to the map."""
-    mock_map = MagicMock()
+@patch('builtins.print')
+def test_create_time_view_html_comprehensive_workflow(mock_print, mock_circle, mock_map, mock_load_coords, sample_time_view_data):
+    """
+    Comprehensive test for create_time_view_html covering complete workflow, marker creation,
+    filename format validation, partial coordinates handling, and date filtering.
     
-    affected_stanox = {12345, 12346, 12347}
-    incident_counts = {12345: 5, 12346: 3, 12347: 1}
-    total_pfpi = {12345: 106, 12346: 36, 12347: 30}
-    stanox_to_coords = {
-        '12345': [51.5074, -0.1278],
+    Tests:
+    - Complete workflow: print stats, create map, add markers, save file
+    - Correct number of markers created (4 for 4 affected stations on 2024-01-15)
+    - Correct filename format (time_view_YYYY_MM_DD.html)
+    - Graceful handling of partial station coordinates
+    - Correct date filtering and independence between dates
+    """
+    # Arrange: Mock dependencies with full coordinates
+    full_coords = {
+        '12345': [51.5307, -0.1234],
         '12346': [53.4808, -2.2426],
-        '12347': [52.5200, 13.4050],
+        '12347': [52.5078, -1.9043],
+        '12348': [53.7949, -1.7477],
     }
     
-    _create_time_view_markers(mock_map, affected_stanox, incident_counts, total_pfpi, stanox_to_coords)
+    mock_load_coords.return_value = full_coords
+    mock_map_instance = MagicMock()
+    mock_map.return_value = mock_map_instance
     
-    # Should add markers for each STANOX
-    assert mock_circle.call_count >= len(affected_stanox)
+    # Act: Process 2024-01-15 (10 incidents across 4 stations)
+    create_time_view_html('2024-01-15', sample_time_view_data)
+    
+    # Map should be created with correct center and zoom
+    assert mock_map.called
+    map_call_args = mock_map.call_args
+    assert map_call_args[1]['location'] == [54.5, -2.5]  # UK center
+    assert map_call_args[1]['zoom_start'] == 6
+    
+    # Correct number of markers created (4 affected stations)
+    assert mock_circle.call_count >= 4
+    
+    # Map should be saved with correct filename
+    assert mock_map_instance.save.called
+    save_call_args = mock_map_instance.save.call_args
+    filename = save_call_args[0][0]
+    assert filename.startswith('time_view_')
+    assert filename.endswith('.html')
+    assert '2024_01_15' in filename
+    
+    # Reset mocks for second date test. This was done to not repeat lines of code
+    mock_map.reset_mock()
+    mock_circle.reset_mock()
+    mock_print.reset_mock()
+    mock_map.return_value = mock_map_instance
+    
+    # Act: Process 2024-01-16 (different date with fewer incidents)
+    create_time_view_html('2024-01-16', sample_time_view_data)
+    
+    # Assert: Verify date filtering works independently
+    assert mock_map.called  # Map should still be created
+    
+    # Test with partial coordinates (missing 2 of 4 stations)
+    mock_map.reset_mock()
+    mock_circle.reset_mock()
+    partial_coords = {
+        '12345': [51.5307, -0.1234],
+        '12346': [53.4808, -2.2426],
+        # 12347 and 12348 missing
+    }
+    mock_load_coords.return_value = partial_coords
+    mock_map.return_value = mock_map_instance
+    
+    # Act: Should not crash with missing coordinates
+    create_time_view_html('2024-01-15', sample_time_view_data)
+    
+    # Assert: Function completes without error
+    assert mock_map.called
+    assert mock_circle.call_count >= 2
 
 
-@patch('folium.CircleMarker')
-def test_create_time_view_markers_color_grading(mock_circle):
-    """Test _create_time_view_markers applies correct colors based on PFPI."""
-    mock_map = MagicMock()
+@patch('rdmpy.outputs.analysis_tools._load_station_coordinates')
+@patch('folium.Map')
+def test_create_time_view_html_no_data_returns_gracefully(mock_map, mock_load_coords, sample_time_view_data):
+    """
+    Test that create_time_view_html handles dates with no incidents gracefully.
     
-    affected_stanox = {12345}
-    incident_counts = {12345: 1}
-    total_pfpi = {12345: 50.0}  # 31-60 min range = Red
-    stanox_to_coords = {'12345': [51.5074, -0.1278]}
+    Expected behavior:
+    - Function should return early without creating map
+    - No exception should be raised
+    """
+    # Arrange
+    mock_load_coords.return_value = {}
     
-    _create_time_view_markers(mock_map, affected_stanox, incident_counts, total_pfpi, stanox_to_coords)
+    # Act & Assert: Should not crash on non-existent date
+    result = create_time_view_html('2024-12-31', sample_time_view_data)
     
-    # Check that a marker was added with appropriate color
-    assert mock_circle.called
-    call_args = mock_circle.call_args
-    if call_args:
-        # Color should be red for 31-60 min range
-        assert call_args[1].get('color') == '#FF0000' or call_args[1].get('fill_color') == '#FF0000'
+    # Map should NOT be created for date with no data
+    # (Since _aggregate_time_view_data returns None)
+    assert result is None
 
-
-@patch('folium.CircleMarker')
-def test_create_time_view_markers_radius_scaling(mock_circle):
-    """Test _create_time_view_markers scales radius by incident count."""
-    mock_map = MagicMock()
-    
-    affected_stanox = {12345}
-    incident_counts = {12345: 10}  # Higher count should have larger radius
-    total_pfpi = {12345: 50.0}
-    stanox_to_coords = {'12345': [51.5074, -0.1278]}
-    
-    _create_time_view_markers(mock_map, affected_stanox, incident_counts, total_pfpi, stanox_to_coords)
-    
-    # Check radius is scaled
-    assert mock_circle.called
-    call_args = mock_circle.call_args
-    if call_args:
-        # Radius should increase with incident count
-        assert call_args[1].get('radius') > 5
-
-
-@patch('folium.Element')
-def test_finalize_time_view_map_adds_title(mock_element):
-    """Test _finalize_time_view_map adds title to the map."""
-    mock_map = MagicMock()
-    
-    _finalize_time_view_map(mock_map, '2024-01-15')
-    
-    # Should call html.add_child for title and legend
-    assert mock_map.get_root().html.add_child.called
-
-
-@patch('folium.Element')
-@patch('builtins.open', create=True)
-def test_finalize_time_view_map_saves_file(mock_open, mock_element):
-    """Test _finalize_time_view_map saves the map to file."""
-    mock_map = MagicMock()
-    
-    _finalize_time_view_map(mock_map, '2024-01-15')
-    
-    # Should call map.save()
-    assert mock_map.save.called
-    # Check that save was called with correct filename pattern
-    call_args = mock_map.save.call_args
-    if call_args:
-        filename = call_args[0][0]
-        assert 'time_view_2024_01_15' in filename
-
-
-@patch('folium.Element')
-def test_finalize_time_view_map_adds_legend(mock_element):
-    """Test _finalize_time_view_map adds legend to the map."""
-    mock_map = MagicMock()
-    
-    _finalize_time_view_map(mock_map, '2024-01-15')
-    
-    # Should add HTML elements for legend
-    calls = mock_map.get_root().html.add_child.call_count
-    # At least one call for title/legend
-    assert calls >= 1
-
-
-def test_aggregate_time_view_data_preserves_stanox_format(sample_time_view_data):
-    """Test _aggregate_time_view_data returns STANOX in consistent format."""
-    affected_stanox, incident_counts, total_pfpi = _aggregate_time_view_data('2024-01-15', sample_time_view_data)
-    
-    if affected_stanox is not None:
-        # All STANOX should be convertible to int
-        for stanox in affected_stanox:
-            int_stanox = int(stanox)
-            assert 10000 <= int_stanox <= 100000  # Valid STANOX range
