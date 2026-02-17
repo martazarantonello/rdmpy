@@ -3271,22 +3271,13 @@ def create_time_view_html(date_str, all_data):
 
 
 
-# functions for station view
-
 def station_view_yearly(station_id, interval_minutes=30):
     """
-    Station analysis for yearly data across all incidents.
-    Analyzes all days of week and separates incident vs normal operations.
-    
-    Parameters:
-    station_id (str): Station folder ID
-    interval_minutes (int): Time interval for grouping (default: 30)
-    
-    Returns:
-    tuple: (incident_summary_df, normal_summary_df) - DataFrames with time-period statistics
+    Station analysis for yearly data across all incidents - simplified output.
+    Analyzes all days of the week for a station and separates incident vs normal operations.
     """
     
-    # Step 1: Load all station day files
+    # Load data from all day files
     processed_base = '../processed_data'
     station_folder = os.path.join(processed_base, station_id)
     
@@ -3294,19 +3285,166 @@ def station_view_yearly(station_id, interval_minutes=30):
         print(f"Station folder not found: {station_folder}")
         return None, None
     
-    combined_data = _load_all_station_day_files(station_folder)
-    if combined_data is None:
+    # Define day files to load
+    day_files = ['MO.parquet', 'TU.parquet', 'WE.parquet', 'TH.parquet', 'FR.parquet', 'SA.parquet', 'SU.parquet']
+    
+    all_station_data = []
+    
+    for day_file in day_files:
+        file_path = os.path.join(station_folder, day_file)
+        if os.path.exists(file_path):
+            try:
+                day_data = pd.read_parquet(file_path, engine='fastparquet')
+                day_data['day_of_week'] = day_file.replace('.parquet', '')
+                all_station_data.append(day_data)
+                print(f"Loaded {len(day_data)} records from {day_file}")
+            except Exception as e:
+                print(f"Error loading {day_file}: {e}")
+        else:
+            print(f"File not found: {day_file}")
+    
+    if not all_station_data:
         print("No data files found for this station")
         return None, None
     
-    # Step 2: Separate incident and normal operations
-    incident_data, normal_data = _separate_incident_and_normal_operations(combined_data)
-    if incident_data is None:
+    # Combine all data
+    combined_data = pd.concat(all_station_data, ignore_index=True)
+    print(f"Total combined records: {len(combined_data)}")
+    
+    # Filter for trains with planned calls
+    train_mask = combined_data['PLANNED_CALLS'].notna()
+    all_train_data = combined_data[train_mask].copy()
+    
+    # Maximum delay deduplication
+    if len(all_train_data) > 0:
+        all_train_data['delay_numeric'] = pd.to_numeric(all_train_data['PFPI_MINUTES'], errors='coerce').fillna(0)
+        all_train_data['dedup_priority'] = all_train_data['delay_numeric'] * 1000
+        
+        if 'ACTUAL_CALLS' in all_train_data.columns:
+            all_train_data['dedup_priority'] += all_train_data['ACTUAL_CALLS'].notna().astype(int) * 100
+        
+        basic_dedup_cols = ['TRAIN_SERVICE_CODE', 'PLANNED_CALLS', 'day_of_week']
+        basic_available = [col for col in basic_dedup_cols if col in all_train_data.columns]
+        
+        if len(basic_available) >= 2:
+            all_train_data = all_train_data.sort_values(['delay_numeric', 'dedup_priority'], ascending=[False, False])
+            all_train_data = all_train_data.drop_duplicates(subset=basic_available, keep='first')
+            all_train_data = all_train_data.drop(['delay_numeric', 'dedup_priority'], axis=1)
+    
+    if len(all_train_data) == 0:
         return None, None
     
-    # Step 3: Process both incident and normal operations
-    incident_summary = _process_operations_data(incident_data, 'incident', interval_minutes)
-    normal_summary = _process_operations_data(normal_data, 'normal', interval_minutes)
+    # Separate incident and normal operations
+    # Assume trains with incident codes are incident-related
+    incident_mask = all_train_data['INCIDENT_NUMBER'].notna()
+    incident_data = all_train_data[incident_mask].copy()
+    normal_data = all_train_data[~incident_mask].copy()
+    
+    print(f"Incident-related records: {len(incident_data)}")
+    print(f"Normal operations records: {len(normal_data)}")
+    
+    def process_operations_data(data, operation_type):
+        """Process data for either incident or normal operations"""
+        if len(data) == 0:
+            return pd.DataFrame()
+        
+        # Process times - using a reference date for time parsing
+        reference_date = datetime(2024, 1, 1)  # Use a standard reference date
+        
+        def parse_time_simple(time_val, base_date):
+            if pd.isna(time_val):
+                return None
+            try:
+                time_str = str(int(time_val)).zfill(4)
+                hour = int(time_str[:2])
+                minute = int(time_str[2:])
+                return base_date.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            except:
+                return None
+        
+        # Parse times and apply corrected timing logic
+        data['planned_dt'] = data['PLANNED_CALLS'].apply(
+            lambda x: parse_time_simple(x, reference_date))
+        data['original_actual_dt'] = data['ACTUAL_CALLS'].apply(
+            lambda x: parse_time_simple(x, reference_date))
+        data['delay_minutes'] = pd.to_numeric(data['PFPI_MINUTES'], errors='coerce').fillna(0)
+        
+        # Create corrected actual times
+        corrected_actual_times = []
+        for _, row in data.iterrows():
+            planned_dt = row['planned_dt']
+            original_actual_dt = row['original_actual_dt']
+            delay_min = row['delay_minutes']
+            
+            if pd.isna(planned_dt):
+                corrected_actual_times.append(None)
+                continue
+                
+            if delay_min > 0:
+                corrected_actual = planned_dt + timedelta(minutes=delay_min)
+                corrected_actual_times.append(corrected_actual)
+            elif delay_min == 0:
+                corrected_actual_times.append(planned_dt)
+            else:
+                if pd.notna(original_actual_dt):
+                    corrected_actual_times.append(original_actual_dt)
+                else:
+                    corrected_actual_times.append(planned_dt)
+        
+        data['effective_time'] = corrected_actual_times
+        valid_data = data[data['effective_time'].notna()].copy()
+        
+        if len(valid_data) == 0:
+            return pd.DataFrame()
+        
+        # Group by time intervals (using hour of day for grouping)
+        valid_data['hour_of_day'] = valid_data['effective_time'].dt.hour
+        valid_data['interval_group'] = (valid_data['hour_of_day'] * 60 + valid_data['effective_time'].dt.minute) // interval_minutes
+        
+        intervals = []
+        
+        for interval_group in valid_data['interval_group'].unique():
+            interval_trains = valid_data[valid_data['interval_group'] == interval_group]
+            
+            if len(interval_trains) > 0:
+                arrival_trains = interval_trains[interval_trains['EVENT_TYPE'] != 'C']
+                cancellation_trains = interval_trains[interval_trains['EVENT_TYPE'] == 'C']
+                
+                if len(arrival_trains) > 0 or len(cancellation_trains) > 0:
+                    if len(arrival_trains) > 0:
+                        delay_values = arrival_trains['delay_minutes'].tolist()
+                        ontime_arrivals = len([d for d in delay_values if d == 0.0])
+                        delayed_arrivals = len([d for d in delay_values if d > 0.0])
+                        delayed_minutes = [round(d, 1) for d in delay_values if d > 0.0]
+                    else:
+                        ontime_arrivals = 0
+                        delayed_arrivals = 0
+                        delayed_minutes = []
+                    
+                    total_cancellations = len(cancellation_trains)
+                    
+                    # Calculate time period label
+                    start_minute = interval_group * interval_minutes
+                    end_minute = start_minute + interval_minutes
+                    start_hour = start_minute // 60
+                    start_min = start_minute % 60
+                    end_hour = end_minute // 60
+                    end_min = end_minute % 60
+                    
+                    intervals.append({
+                        'time_period': f"{start_hour:02d}:{start_min:02d}-{end_hour:02d}:{end_min:02d}",
+                        'ontime_arrival_count': ontime_arrivals,
+                        'delayed_arrival_count': delayed_arrivals,
+                        'cancellation_count': total_cancellations,
+                        'delay_minutes': delayed_minutes,
+                        'operation_type': operation_type
+                    })
+        
+        return pd.DataFrame(intervals)
+    
+    # Process both incident and normal operations
+    incident_summary = process_operations_data(incident_data, 'incident')
+    normal_summary = process_operations_data(normal_data, 'normal')
     
     return incident_summary, normal_summary
 
@@ -3361,11 +3499,11 @@ def plot_trains_in_system_vs_delay(station_id, all_data, time_window_minutes=60,
     plt.style.use('default')
     sns.set_palette("husl")
     
-    print(f"🚂 TRAINS IN SYSTEM vs DELAY ANALYSIS FOR STATION {station_id}")
-    print(f"📊 Platforms: {num_platforms}, Assumed Dwell Time: {dwell_time_minutes} min")
-    print(f"📏 Trains in system NORMALIZED by {num_platforms} platforms")
-    print(f"📏 ONE POINT PER HOUR (same as plot_variable_relationships)")
-    print(f"⚠️  DELAY calculated ONLY from delayed trains (delay > 0)")
+    print(f"TRAINS IN SYSTEM vs DELAY ANALYSIS FOR STATION {station_id}")
+    print(f"Platforms: {num_platforms}, Assumed Dwell Time: {dwell_time_minutes} min")
+    print(f"Trains in system NORMALIZED by {num_platforms} platforms")
+    print(f"ONE POINT PER HOUR (same as plot_variable_relationships)")
+    print(f"DELAY calculated ONLY from delayed trains (delay > 0)")
     print("=" * 70)
     
     # Filter data for the specific station
@@ -3507,19 +3645,18 @@ def plot_trains_in_system_vs_delay(station_id, all_data, time_window_minutes=60,
         delay_threshold = hourly_stats['mean_delay'].quantile(max_delay_percentile / 100)
         hourly_stats = hourly_stats[hourly_stats['mean_delay'] <= delay_threshold]
     
-    print(f"\n✅ Processed {len(hourly_stats)} hours total (weekdays and weekends merged)")
+    print(f"Processed {len(hourly_stats)} hours total (weekdays and weekends merged)")
     
     # Create single visualization
-    fig, ax = plt.subplots(1, 1, figsize=(12, 8))
+    fig, ax = plt.subplots(1, 1, figsize=(8, 4.7))
     
     # Calculate correlation
     r_corr = hourly_stats[['trains_in_system_normalized', 'mean_delay']].corr().iloc[0, 1]
     
     # Scatter plot: One point per HOUR (like plot_variable_relationships)
     ax.scatter(hourly_stats['trains_in_system_normalized'], hourly_stats['mean_delay'], 
-              alpha=0.3, color='lightblue', s=30, 
-              edgecolors='blue', linewidth=0.3,
-              label=f'Hourly data (n={len(hourly_stats)})')
+              alpha=0.3, color='lightblue', s=15, 
+              edgecolors='blue', linewidth=0.2)
     
     # Add binned statistics with asymmetric error bars (like plot_variable_relationships)
     if len(hourly_stats) > 10:
@@ -3563,9 +3700,8 @@ def plot_trains_in_system_vs_delay(station_id, all_data, time_window_minutes=60,
                 # Plot binned averages with error bars
                 ax.errorbar(bin_trains, bin_delays, 
                            yerr=[yerr_lower, yerr_upper],
-                           fmt='o', color='darkgreen', markersize=8, 
-                           linewidth=2, capsize=5, capthick=2,
-                           label=f'Binned averages (n={len(bin_trains)}) Q25-Q75', zorder=5)
+                           fmt='o', color='darkgreen', markersize=5, 
+                           linewidth=1.5, capsize=3, capthick=1, zorder=5)
                 
                 # Smooth curve through binned data
                 try:
@@ -3576,23 +3712,20 @@ def plot_trains_in_system_vs_delay(station_id, all_data, time_window_minutes=60,
                     spline = make_interp_spline(x_sorted, y_sorted, k=min(3, len(x_sorted)-1))
                     x_smooth = np.linspace(x_sorted.min(), x_sorted.max(), 200)
                     y_smooth = spline(x_smooth)
-                    ax.plot(x_smooth, y_smooth, 'g-', linewidth=3, 
-                           label='Smooth trend (spline)', zorder=10)
+                    ax.plot(x_smooth, y_smooth, 'g-', linewidth=1.5, zorder=10)
                 except:
                     pass
     
-    ax.set_xlabel('Normalized Trains in System (trains/platform)', fontsize=12, fontweight='bold')
-    ax.set_ylabel('Mean Delay (minutes)', fontsize=12, fontweight='bold')
-    ax.set_title(f'Mean Delay vs Trains in System\n(One Point Per Hour - All Days)', 
-                fontsize=14, fontweight='bold')
+    ax.set_xlabel('Normalized Trains\nin System (tph/platform)', fontsize=23)
+    ax.set_ylabel('Mean Delay\n(minutes)', fontsize=23)
     ax.set_xlim(0, 2.5)  # Fixed x-axis range for normalized trains in system
     ax.set_ylim(0, 25)  # Fixed y-axis range for delays
     ax.grid(True, alpha=0.3)
-    ax.legend(fontsize=10)
+    ax.tick_params(axis='both', labelsize=23)
     
     # Print statistics
     print(f"\n{'='*80}")
-    print(f"📊 STATION {station_id} - DELAY vs TRAINS IN SYSTEM (ALL DAYS)")
+    print(f"STATION {station_id} - DELAY vs TRAINS IN SYSTEM (ALL DAYS)")
     print(f"{'='*80}")
     print(f"\nDATA SUMMARY:")
     print(f"  - Total hours analyzed: {len(hourly_stats)}")
@@ -3602,8 +3735,6 @@ def plot_trains_in_system_vs_delay(station_id, all_data, time_window_minutes=60,
     print(f"  - Hours with delays > 0: {(hourly_stats['mean_delay'] > 0).sum()} ({100*(hourly_stats['mean_delay'] > 0).sum()/len(hourly_stats):.1f}%)")
     print(f"  - Correlation (trains in system vs delay): {r_corr:.3f}")
     
-    plt.suptitle(f'Mean Delay vs Trains in System - Station {station_id}\n({num_platforms} platforms, One Point Per Hour, All Days Merged)', 
-                 fontsize=16, fontweight='bold')
     plt.tight_layout()
     plt.show()
     
@@ -3639,8 +3770,8 @@ def explore_delay_outliers(station_id, all_data, num_platforms=6, dwell_time_min
     import pandas as pd
     import numpy as np
     
-    print(f"🔍 EXPLORING DELAY OUTLIERS FOR STATION {station_id}")
-    print(f"📊 Focus: Extreme delays and worst-case scenarios")
+    print(f"EXPLORING DELAY OUTLIERS FOR STATION {station_id}")
+    print(f"Focus: Extreme delays and worst-case scenarios")
     print("=" * 70)
     
     # Filter and prepare data (same as plot_trains_in_system_vs_delay)
@@ -3774,10 +3905,10 @@ def explore_delay_outliers(station_id, all_data, num_platforms=6, dwell_time_min
         print("No statistics to plot.")
         return None
     
-    print(f"✅ Processed {len(hourly_stats)} hours with delay statistics")
+    print(f" Processed {len(hourly_stats)} hours with delay statistics")
     
     # Create single panel visualization - Percentile Comparison
-    fig, ax = plt.subplots(1, 1, figsize=figsize)
+    fig, ax = plt.subplots(1, 1, figsize=(8, 4.7))
     
     # Bin by trains in system for clearer trend visualization
     n_bins = 15
@@ -3807,15 +3938,15 @@ def explore_delay_outliers(station_id, all_data, num_platforms=6, dwell_time_min
                 p99_vals.append(bin_data['p99_delay'].mean())
         
         if len(bin_centers) > 0:
-            ax.plot(bin_centers, mean_vals, 'o-', color='blue', linewidth=2, markersize=6, label='Mean')
-            ax.plot(bin_centers, p50_vals, 'o-', color='green', linewidth=2, markersize=6, label='P50 (Median)')
-            ax.plot(bin_centers, p90_vals, 's-', color='orange', linewidth=2, markersize=6, label='P90')
-            ax.plot(bin_centers, p95_vals, '^-', color='red', linewidth=2, markersize=6, label='P95')
-            ax.plot(bin_centers, p99_vals, 'D-', color='darkred', linewidth=2, markersize=6, label='P99 (Extreme)')
+            ax.plot(bin_centers, mean_vals, 'o-', color='blue', linewidth=1.5, markersize=4)
+            ax.plot(bin_centers, p50_vals, 'o-', color='green', linewidth=1.5, markersize=4)
+            ax.plot(bin_centers, p90_vals, 's-', color='orange', linewidth=1.5, markersize=4)
+            ax.plot(bin_centers, p95_vals, '^-', color='red', linewidth=1.5, markersize=4)
+            ax.plot(bin_centers, p99_vals, 'D-', color='darkred', linewidth=1.5, markersize=4)
     
-    ax.set_xlabel('Normalized Trains in System', fontsize=12, fontweight='bold')
-    ax.set_ylabel('Delay Percentiles (minutes)', fontsize=12, fontweight='bold')
-    ax.legend(fontsize=10)
+    ax.set_xlabel('Normalized Trains\nin System (tph/platform)', fontsize=23)
+    ax.set_ylabel('Delay Percentiles\n(minutes)', fontsize=23)
+    ax.tick_params(axis='both', labelsize=23)
     ax.grid(True, alpha=0.3)
     ax.set_xlim(0, 2.5)  # Fixed x-axis for comparison
     ax.set_ylim(0, 30)   # Fixed y-axis: delay percentiles to 30 minutes
@@ -3823,21 +3954,38 @@ def explore_delay_outliers(station_id, all_data, num_platforms=6, dwell_time_min
     plt.tight_layout()
     plt.show()
     
+    # Create separate legend image
+    fig_leg, ax_leg = plt.subplots(figsize=(10, 4))
+    ax_leg.axis('off')
+    
+    # Create dummy lines for legend
+    lines = [
+        plt.Line2D([0], [0], marker='o', color='blue', linewidth=2, markersize=8, label='Mean'),
+        plt.Line2D([0], [0], marker='o', color='green', linewidth=2, markersize=8, label='P50 (Median)'),
+        plt.Line2D([0], [0], marker='s', color='orange', linewidth=2, markersize=8, label='P90'),
+        plt.Line2D([0], [0], marker='^', color='red', linewidth=2, markersize=8, label='P95'),
+        plt.Line2D([0], [0], marker='D', color='darkred', linewidth=2, markersize=8, label='P99 (Extreme)')
+    ]
+    ax_leg.legend(handles=lines, fontsize=23, loc='center', ncol=5)
+    
+    plt.tight_layout()
+    plt.show()
+    
     # Print extreme delay statistics
     print(f"\n{'='*80}")
-    print(f"📈 EXTREME DELAY STATISTICS - STATION {station_id}")
+    print(f" EXTREME DELAY STATISTICS - STATION {station_id}")
     print(f"{'='*80}")
     
     # Find hours with worst delays
     worst_hours = hourly_stats.nlargest(5, 'max_delay')
-    print(f"\n🔴 TOP 5 WORST HOURS (by maximum delay):")
+    print(f" TOP 5 WORST HOURS (by maximum delay):")
     for idx, row in worst_hours.iterrows():
         print(f"  {row['hour_start'].strftime('%Y-%m-%d %H:%M')}: "
               f"Max={row['max_delay']:.1f}min, Mean={row['mean_delay']:.1f}min, "
               f"Trains={row['trains_in_system_normalized']:.2f}/platform ({row['num_delayed']} delayed)")
     
     # Overall statistics
-    print(f"\n📊 OVERALL DELAY STATISTICS:")
+    print(f" OVERALL DELAY STATISTICS:")
     print(f"  - P90 delay across all hours: {hourly_stats['p90_delay'].mean():.2f} min")
     print(f"  - P95 delay across all hours: {hourly_stats['p95_delay'].mean():.2f} min")
     print(f"  - P99 delay across all hours: {hourly_stats['p99_delay'].mean():.2f} min")
@@ -3847,7 +3995,7 @@ def explore_delay_outliers(station_id, all_data, num_platforms=6, dwell_time_min
     # Correlation analysis
     high_load = hourly_stats[hourly_stats['trains_in_system_normalized'] > 1.0]
     if len(high_load) > 0:
-        print(f"\n🔍 HIGH LOAD ANALYSIS (>1.0 trains/platform):")
+        print(f" HIGH LOAD ANALYSIS (>1.0 trains/platform):")
         print(f"  - Hours in high load: {len(high_load)} ({100*len(high_load)/len(hourly_stats):.1f}%)")
         print(f"  - Mean delay in high load: {high_load['mean_delay'].mean():.2f} min")
         print(f"  - P95 delay in high load: {high_load['p95_delay'].mean():.2f} min")
@@ -3855,3 +4003,534 @@ def explore_delay_outliers(station_id, all_data, num_platforms=6, dwell_time_min
     return hourly_stats
 
 print("explore_delay_outliers function ready!")
+
+def station_view(station_id, all_data, num_platforms=6, time_window_minutes=60, max_delay_percentile=98, dwell_time_minutes=5, figsize=(8, 4.7)):
+    """
+    Comprehensive merged station performance analysis combining 3 visualization functions.
+    Analyzes on-time performance and system load relationships.
+    
+    Parameters:
+    -----------
+    station_id : str
+        The STANOX code for the station
+    all_data : pd.DataFrame
+        The complete dataset with all station data
+    num_platforms : int
+        Number of platforms at the station (for normalization)
+    time_window_minutes : int
+        Time window for analysis (typically 60 for hourly)
+    max_delay_percentile : int
+        Maximum delay percentile to consider (typically 98)
+    dwell_time_minutes : int
+        Typical dwell time at the station in minutes
+    figsize : tuple
+        Figure size (width, height) - applied to all plots
+    
+    Returns:
+    --------
+    dict
+        Dictionary containing hourly_stats and bin_stats DataFrames
+    """
+    import matplotlib.pyplot as plt
+    import pandas as pd
+    import numpy as np
+    from scipy.stats import pearsonr
+    from scipy.interpolate import make_interp_spline
+    
+    # ===== DATA PREPARATION (Common to all plots) =====
+    data = all_data[all_data['STANOX'] == str(station_id)].copy()
+    if len(data) == 0:
+        print(f"No data found for station {station_id}")
+        return None
+    
+    all_arrived_data = data[data['EVENT_TYPE'] != 'C'].copy()
+    if len(all_arrived_data) == 0:
+        print("No arrived trains found.")
+        return None
+    
+    all_arrived_data['delay_minutes'] = pd.to_numeric(all_arrived_data['PFPI_MINUTES'], errors='coerce').fillna(0)
+    all_arrived_data['time_in_system'] = dwell_time_minutes + all_arrived_data['delay_minutes']
+    
+    def parse_event_datetime(event_dt_str):
+        if pd.isna(event_dt_str):
+            return None
+        try:
+            dt = pd.to_datetime(event_dt_str, format='%d-%b-%Y %H:%M', errors='coerce')
+            return dt.date() if pd.notna(dt) else None
+        except:
+            return None
+    
+    all_arrived_data['event_date'] = all_arrived_data['EVENT_DATETIME'].apply(parse_event_datetime)
+    
+    day_to_weekday = {'MO': 0, 'TU': 1, 'WE': 2, 'TH': 3, 'FR': 4, 'SA': 5, 'SU': 6}
+    day_date_mapping = {}
+    for day_code in day_to_weekday.keys():
+        day_data = all_arrived_data[all_arrived_data['DAY'] == day_code]
+        observed_dates = day_data['event_date'].dropna().unique()
+        if len(observed_dates) > 0:
+            day_date_mapping[day_code] = sorted(observed_dates)
+    
+    all_arrived_data['row_idx'] = range(len(all_arrived_data))
+    
+    def create_datetime_with_event_dates(row):
+        try:
+            day_code = row['DAY']
+            time_val = row['ACTUAL_CALLS'] if pd.notna(row['ACTUAL_CALLS']) else row['PLANNED_CALLS']
+            
+            if pd.isna(time_val) or day_code not in day_to_weekday:
+                return None
+            
+            time_str = str(int(time_val)).zfill(4)
+            hour = int(time_str[:2])
+            minute = int(time_str[2:])
+            
+            if pd.notna(row['event_date']):
+                date_obj = row['event_date']
+            else:
+                if day_code in day_date_mapping and len(day_date_mapping[day_code]) > 0:
+                    date_idx = (hash(str(row['TRAIN_SERVICE_CODE'])) + row['row_idx']) % len(day_date_mapping[day_code])
+                    date_obj = day_date_mapping[day_code][date_idx]
+                else:
+                    return None
+            
+            dt = pd.Timestamp(year=date_obj.year, month=date_obj.month, 
+                            day=date_obj.day, hour=hour, minute=minute)
+            return dt
+        except:
+            return None
+    
+    all_arrived_data['arrival_time'] = all_arrived_data.apply(create_datetime_with_event_dates, axis=1)
+    all_arrived_data['departure_time'] = all_arrived_data['arrival_time'] + pd.to_timedelta(
+        all_arrived_data['time_in_system'], unit='min'
+    )
+    
+    valid_data = all_arrived_data.dropna(subset=['arrival_time', 'departure_time']).copy()
+    
+    if len(valid_data) == 0:
+        print("No valid datetime data.")
+        return None
+    
+    # Calculate hourly statistics
+    min_time = valid_data['arrival_time'].min().floor('h')
+    max_time = valid_data['departure_time'].max().ceil('h')
+    hourly_bins = pd.date_range(start=min_time, end=max_time, freq='h')
+    
+    hourly_stats_list = []
+    
+    for hour_start in hourly_bins[:-1]:
+        hour_end = hour_start + pd.Timedelta(hours=1)
+        
+        in_system = valid_data[
+            (valid_data['arrival_time'] < hour_end) & 
+            (valid_data['departure_time'] > hour_start)
+        ]
+        trains_in_system = in_system['TRAIN_SERVICE_CODE'].nunique()
+        trains_in_system_normalized = trains_in_system / num_platforms
+        
+        # On-time performance
+        ontime_mask = (in_system['delay_minutes'].isna()) | (in_system['delay_minutes'] == 0.0)
+        ontime_trains_count = in_system[ontime_mask]['TRAIN_SERVICE_CODE'].nunique()
+        is_100_percent_ontime = (ontime_trains_count == trains_in_system)
+        
+        if trains_in_system > 0:
+            hourly_stats_list.append({
+                'hour_start': hour_start,
+                'trains_in_system_normalized': trains_in_system_normalized,
+                'total_trains': trains_in_system,
+                'ontime_trains_count': ontime_trains_count,
+                'ontime_trains_normalized': ontime_trains_count / num_platforms,
+                'is_100_percent_ontime': is_100_percent_ontime,
+                'ontime_ratio': ontime_trains_count / trains_in_system
+            })
+    
+    hourly_stats = pd.DataFrame(hourly_stats_list)
+    
+    if len(hourly_stats) == 0:
+        print("No statistics to plot.")
+        return None
+    
+    print(f" Processed {len(hourly_stats)} hours with comprehensive statistics\n")
+    
+    # ===== PLOT 1: On-Time Performance vs System Load =====
+    fig1, ax1 = plt.subplots(1, 1, figsize=figsize)
+    
+    ax1.scatter(hourly_stats['trains_in_system_normalized'], 
+               hourly_stats['ontime_trains_normalized'],
+               c='cornflowerblue', alpha=0.6, s=30,
+               edgecolors='black', linewidth=0.5)
+    
+    max_val = max(hourly_stats['trains_in_system_normalized'].max(), 
+                  hourly_stats['ontime_trains_normalized'].max())
+    ax1.plot([0, max_val], [0, max_val], 'g--', linewidth=1.5, alpha=0.7)
+    
+    z = np.polyfit(hourly_stats['trains_in_system_normalized'], hourly_stats['ontime_trains_normalized'], 1)
+    p = np.poly1d(z)
+    x_trend = np.linspace(hourly_stats['trains_in_system_normalized'].min(), 
+                         hourly_stats['trains_in_system_normalized'].max(), 100)
+    ax1.plot(x_trend, p(x_trend), "r-", linewidth=1.5, alpha=0.8)
+    
+    ax1.set_xlabel('Normalized Trains\nin System (tph/platform)', fontsize=23)
+    ax1.set_ylabel('On-Time Trains\n(tph/platform)', fontsize=23)
+    ax1.tick_params(axis='both', labelsize=23)
+    ax1.grid(True, alpha=0.3)
+    ax1.set_xlim(0, 2.5)
+    ax1.set_ylim(0, 2.5)
+    
+    plt.tight_layout()
+    plt.show()
+    print(" Plot 1 complete: On-Time Performance vs System Load\n")
+    
+    # ===== PLOT 2: On-Time Performance Histogram =====
+    bin_width = 0.2
+    max_load = hourly_stats['trains_in_system_normalized'].max()
+    bins = np.arange(0, max_load + bin_width, bin_width)
+    
+    # Create single value labels (bin midpoints)
+    labels = [f'{(bins[i] + bins[i+1])/2:.1f}' for i in range(len(bins)-1)]
+    hourly_stats['load_bin'] = pd.cut(hourly_stats['trains_in_system_normalized'], 
+                                       bins=bins, 
+                                       labels=labels,
+                                       include_lowest=True)
+    
+    bin_stats = hourly_stats.groupby('load_bin', observed=True).agg(
+        total_hours=('is_100_percent_ontime', 'count'),
+        hours_100_percent=('is_100_percent_ontime', 'sum'),
+        mean_ontime_ratio=('ontime_ratio', 'mean'),
+        std_ontime_ratio=('ontime_ratio', 'std')
+    ).reset_index()
+    
+    bin_stats['pct_hours_100_ontime'] = (bin_stats['hours_100_percent'] / bin_stats['total_hours'] * 100)
+    bin_stats['cumulative_hours'] = bin_stats['total_hours'].cumsum()
+    bin_stats['cdf'] = (bin_stats['cumulative_hours'] / bin_stats['total_hours'].sum() * 100)
+    
+    fig2, ax2 = plt.subplots(1, 1, figsize=figsize)
+    
+    x_pos = np.arange(len(bin_stats))
+    bars = ax2.bar(x_pos, bin_stats['pct_hours_100_ontime'], 
+                   color='cornflowerblue', alpha=0.7, edgecolor='black', linewidth=1.0, width=0.6)
+    
+    ax2.set_xlabel('Normalized Trains\nin System (tph/platform)', fontsize=23)
+    ax2.set_ylabel('% of Hours\n100% On-Time', fontsize=23)
+    ax2.tick_params(axis='both', labelsize=23)
+    ax2.set_xticks(x_pos)
+    ax2.set_xticklabels(bin_stats['load_bin'], rotation=0, fontsize=23)
+    ax2.set_xlim(-0.5, 12)
+    ax2.set_xticks(np.arange(0, 13, 2.5))
+    ax2.set_xticklabels([f'{x:.1f}' for x in np.arange(0, 2.6, 0.5)], fontsize=23)
+    ax2.set_ylim(0, 105)
+    ax2.grid(True, alpha=0.3, axis='y')
+    
+    plt.tight_layout()
+    plt.show()
+    print(" Plot 2 complete: On-Time Performance Histogram\n")
+    
+    # ===== PLOT 3: Cumulative Distribution Function (CDF) =====
+    fig3, ax3 = plt.subplots(1, 1, figsize=figsize)
+    
+    cdf_values = bin_stats['cdf'].values
+    ax3.plot(x_pos, cdf_values, 
+            marker='o', markersize=6, linewidth=2, color='darkred', 
+            markerfacecolor='red', markeredgecolor='darkred', markeredgewidth=1.0)
+    ax3.fill_between(x_pos, 0, cdf_values, alpha=0.15, color='darkred')
+    
+    ax3.set_xlabel('Normalized Trains\nin System (tph/platform)', fontsize=23)
+    ax3.set_ylabel('Cumulative\nDistribution (%)', fontsize=23)
+    ax3.tick_params(axis='both', labelsize=23)
+    ax3.set_xticks(x_pos)
+    ax3.set_xticklabels(bin_stats['load_bin'], rotation=0, fontsize=23)
+    ax3.set_xlim(-0.5, 12)
+    ax3.set_xticks(np.arange(0, 13, 2.5))
+    ax3.set_xticklabels([f'{x:.1f}' for x in np.arange(0, 2.6, 0.5)], fontsize=23)
+    ax3.set_ylim(0, 105)
+    ax3.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.show()
+    print("Plot 3 complete: Cumulative Distribution Function\n")
+    
+    # Print summary statistics
+    print(f"\n{'='*80}")
+    print(f"COMPREHENSIVE STATION ANALYSIS SUMMARY FOR STATION {station_id}")
+    print(f"{'='*80}")
+    
+    print(f"\nON-TIME PERFORMANCE:")
+    print(f"  - Hours with 100% on-time: {hourly_stats['is_100_percent_ontime'].sum()} ({100*hourly_stats['is_100_percent_ontime'].sum()/len(hourly_stats):.1f}%)")
+    
+    print(f"\nSYSTEM LOAD:")
+    print(f"  - Min normalized trains/platform: {hourly_stats['trains_in_system_normalized'].min():.2f}")
+    print(f"  - Max normalized trains/platform: {hourly_stats['trains_in_system_normalized'].max():.2f}")
+    print(f"  - Mean normalized trains/platform: {hourly_stats['trains_in_system_normalized'].mean():.2f}")
+    
+    print(f"{'='*80}\n")
+    
+    return {
+        'hourly_stats': hourly_stats,
+        'bin_stats': bin_stats
+    }
+
+print("Merged station_view function defined successfully!")
+
+def comprehensive_station_analysis(station_id, all_data, num_platforms=6, dwell_time_minutes=5, max_delay_percentile=98):
+    """
+    Combined comprehensive station analysis displaying all visualizations in a single column figure.
+    
+    Combines plot_trains_in_system_vs_delay, explore_delay_outliers, and station_view 
+    without changing any of their internal logic.
+    
+    Parameters:
+    -----------
+    station_id : str
+        The STANOX code for the station
+    all_data : pd.DataFrame
+        The complete dataset with all station data
+    num_platforms : int
+        Number of platforms at the station (for normalization)
+    dwell_time_minutes : int
+        Typical dwell time at the station in minutes
+    max_delay_percentile : int
+        Maximum delay percentile to consider (typically 98)
+    
+    Returns:
+    --------
+    dict
+        Dictionary containing all results from the three analyses
+    """
+    import matplotlib.pyplot as plt
+    import pandas as pd
+    import numpy as np
+    from scipy.interpolate import make_interp_spline
+    
+    print(f"\n{'='*80}")
+    print(f"COMPREHENSIVE ANALYSIS FOR STATION {station_id}")
+    print(f"{'='*80}\n")
+    
+    # ===== CALL plot_trains_in_system_vs_delay =====
+    print("Running plot_trains_in_system_vs_delay analysis...")
+    delay_analysis_result = plot_trains_in_system_vs_delay(
+        station_id=station_id,
+        all_data=all_data,
+        time_window_minutes=60,
+        num_platforms=num_platforms,
+        figsize=(8, 4.7),
+        max_delay_percentile=max_delay_percentile,
+        dwell_time_minutes=dwell_time_minutes
+    )
+    
+    # ===== CALL explore_delay_outliers =====
+    print("\nRunning explore_delay_outliers analysis...")
+    outlier_analysis_result = explore_delay_outliers(
+        station_id=station_id,
+        all_data=all_data,
+        num_platforms=num_platforms,
+        dwell_time_minutes=dwell_time_minutes,
+        figsize=(8, 4.7)
+    )
+    
+    # ===== CALL station_view =====
+    print("\nRunning station_view analysis...")
+    station_view_result = station_view(
+        station_id=station_id,
+        all_data=all_data,
+        num_platforms=num_platforms,
+        time_window_minutes=60,
+        max_delay_percentile=max_delay_percentile,
+        dwell_time_minutes=dwell_time_minutes,
+        figsize=(8, 4.7)
+    )
+    
+    # ===== CREATE COMBINED FIGURE WITH ALL PLOTS IN A COLUMN =====
+    print("\nCreating combined visualization...")
+    
+    # Create figure with 5 subplots in a column: 5 rows, 1 column
+    # Using figsize that matches individual plot proportions: 5 plots * 4.7 height each
+    fig = plt.figure(figsize=(8, 23.5))
+    
+    # Plot 1: Trains in System vs Delay
+    ax1 = plt.subplot(5, 1, 1)
+    hourly_stats_delay = delay_analysis_result
+    r_corr = hourly_stats_delay[['trains_in_system_normalized', 'mean_delay']].corr().iloc[0, 1]
+    
+    ax1.scatter(hourly_stats_delay['trains_in_system_normalized'], hourly_stats_delay['mean_delay'], 
+              alpha=0.3, color='lightblue', s=15, 
+              edgecolors='blue', linewidth=0.2)
+    
+    if len(hourly_stats_delay) > 10:
+        n_bins = 20
+        min_obs = 5
+        trains_min = hourly_stats_delay['trains_in_system_normalized'].min()
+        trains_max = hourly_stats_delay['trains_in_system_normalized'].max()
+        
+        if trains_max > trains_min:
+            bin_edges = np.linspace(trains_min, trains_max, n_bins + 1)
+            hourly_stats_delay_binned = hourly_stats_delay.copy()
+            hourly_stats_delay_binned['trains_bin'] = pd.cut(hourly_stats_delay_binned['trains_in_system_normalized'], 
+                                                bins=bin_edges, include_lowest=True, labels=False)
+            
+            bin_trains = []
+            bin_delays = []
+            bin_delays_q25 = []
+            bin_delays_q75 = []
+            
+            for bin_idx in range(n_bins):
+                bin_data = hourly_stats_delay_binned[hourly_stats_delay_binned['trains_bin'] == bin_idx]
+                if len(bin_data) >= min_obs:
+                    bin_trains.append(bin_data['trains_in_system_normalized'].mean())
+                    bin_delays.append(bin_data['mean_delay'].mean())
+                    bin_delays_q25.append(bin_data['mean_delay'].quantile(0.25))
+                    bin_delays_q75.append(bin_data['mean_delay'].quantile(0.75))
+            
+            if len(bin_trains) >= 4:
+                bin_trains = np.array(bin_trains)
+                bin_delays = np.array(bin_delays)
+                bin_delays_q25 = np.array(bin_delays_q25)
+                bin_delays_q75 = np.array(bin_delays_q75)
+                
+                yerr_lower = np.maximum(0, bin_delays - bin_delays_q25)
+                yerr_upper = np.maximum(0, bin_delays_q75 - bin_delays)
+                
+                ax1.errorbar(bin_trains, bin_delays, 
+                           yerr=[yerr_lower, yerr_upper],
+                           fmt='o', color='darkgreen', markersize=5, 
+                           linewidth=1.5, capsize=3, capthick=1, zorder=5)
+                
+                try:
+                    sort_idx = np.argsort(bin_trains)
+                    x_sorted = bin_trains[sort_idx]
+                    y_sorted = bin_delays[sort_idx]
+                    
+                    spline = make_interp_spline(x_sorted, y_sorted, k=min(3, len(x_sorted)-1))
+                    x_smooth = np.linspace(x_sorted.min(), x_sorted.max(), 200)
+                    y_smooth = spline(x_smooth)
+                    ax1.plot(x_smooth, y_smooth, 'g-', linewidth=1.5, zorder=10)
+                except:
+                    pass
+    
+    ax1.set_xlabel('Normalized Trains\nin System (tph/platform)', fontsize=23)
+    ax1.set_ylabel('Mean Delay\n(minutes)', fontsize=23)
+    ax1.set_xlim(0, 2.5)
+    ax1.set_ylim(0, 25)
+    ax1.grid(True, alpha=0.3)
+    ax1.tick_params(axis='both', labelsize=23)
+    
+    # Plot 2: Delay Percentiles (from explore_delay_outliers)
+    ax2 = plt.subplot(5, 1, 2)
+    hourly_stats_outliers = outlier_analysis_result
+    
+    n_bins = 15
+    trains_min = hourly_stats_outliers['trains_in_system_normalized'].min()
+    trains_max = hourly_stats_outliers['trains_in_system_normalized'].max()
+    
+    if trains_max > trains_min:
+        bin_edges = np.linspace(trains_min, trains_max, n_bins + 1)
+        hourly_stats_outliers['trains_bin'] = pd.cut(hourly_stats_outliers['trains_in_system_normalized'], 
+                                            bins=bin_edges, include_lowest=True, labels=False)
+        
+        bin_centers = []
+        mean_vals = []
+        p50_vals = []
+        p90_vals = []
+        p95_vals = []
+        p99_vals = []
+        
+        for bin_idx in range(n_bins):
+            bin_data = hourly_stats_outliers[hourly_stats_outliers['trains_bin'] == bin_idx]
+            if len(bin_data) >= 3:
+                bin_centers.append(bin_data['trains_in_system_normalized'].mean())
+                mean_vals.append(bin_data['mean_delay'].mean())
+                p50_vals.append(bin_data['median_delay'].mean())
+                p90_vals.append(bin_data['p90_delay'].mean())
+                p95_vals.append(bin_data['p95_delay'].mean())
+                p99_vals.append(bin_data['p99_delay'].mean())
+        
+        if len(bin_centers) > 0:
+            ax2.plot(bin_centers, mean_vals, 'o-', color='blue', linewidth=1.5, markersize=4)
+            ax2.plot(bin_centers, p50_vals, 'o-', color='green', linewidth=1.5, markersize=4)
+            ax2.plot(bin_centers, p90_vals, 's-', color='orange', linewidth=1.5, markersize=4)
+            ax2.plot(bin_centers, p95_vals, '^-', color='red', linewidth=1.5, markersize=4)
+            ax2.plot(bin_centers, p99_vals, 'D-', color='darkred', linewidth=1.5, markersize=4)
+    
+    ax2.set_xlabel('Normalized Trains\nin System (tph/platform)', fontsize=23)
+    ax2.set_ylabel('Delay Percentiles\n(minutes)', fontsize=23)
+    ax2.tick_params(axis='both', labelsize=23)
+    ax2.grid(True, alpha=0.3)
+    ax2.set_xlim(0, 2.5)
+    ax2.set_ylim(0, 30)
+    ax2.legend(['Mean', 'P50', 'P90', 'P95', 'P99'], fontsize=12, loc='upper left')
+    
+    # Plot 3: On-Time Performance vs System Load (from station_view)
+    ax3 = plt.subplot(5, 1, 3)
+    hourly_stats_sv = station_view_result['hourly_stats']
+    
+    ax3.scatter(hourly_stats_sv['trains_in_system_normalized'], 
+               hourly_stats_sv['ontime_trains_normalized'],
+               c='cornflowerblue', alpha=0.6, s=30,
+               edgecolors='black', linewidth=0.5)
+    
+    max_val = max(hourly_stats_sv['trains_in_system_normalized'].max(), 
+                  hourly_stats_sv['ontime_trains_normalized'].max())
+    ax3.plot([0, max_val], [0, max_val], 'g--', linewidth=1.5, alpha=0.7)
+    
+    z = np.polyfit(hourly_stats_sv['trains_in_system_normalized'], hourly_stats_sv['ontime_trains_normalized'], 1)
+    p = np.poly1d(z)
+    x_trend = np.linspace(hourly_stats_sv['trains_in_system_normalized'].min(), 
+                         hourly_stats_sv['trains_in_system_normalized'].max(), 100)
+    ax3.plot(x_trend, p(x_trend), "r-", linewidth=1.5, alpha=0.8)
+    
+    ax3.set_xlabel('Normalized Trains\nin System (tph/platform)', fontsize=23)
+    ax3.set_ylabel('On-Time Trains\n(tph/platform)', fontsize=23)
+    ax3.tick_params(axis='both', labelsize=23)
+    ax3.grid(True, alpha=0.3)
+    ax3.set_xlim(0, 2.5)
+    ax3.set_ylim(0, 2.5)
+    
+    # Plot 4: On-Time Performance Histogram (from station_view)
+    ax4 = plt.subplot(5, 1, 4)
+    bin_stats = station_view_result['bin_stats']
+    x_pos = np.arange(len(bin_stats))
+    
+    ax4.bar(x_pos, bin_stats['pct_hours_100_ontime'], 
+                   color='cornflowerblue', alpha=0.7, edgecolor='black', linewidth=1.0, width=0.6)
+    
+    ax4.set_xlabel('Normalized trains in system\n(tph/platform)', fontsize=23)
+    ax4.set_ylabel('% of Hours\n100% On-Time', fontsize=23)
+    ax4.tick_params(axis='both', labelsize=23)
+    ax4.set_xticks(x_pos)
+    ax4.set_xticklabels(bin_stats['load_bin'], rotation=0, fontsize=23)
+    ax4.set_xlim(-0.5, 12)
+    ax4.set_xticks(np.arange(0, 13, 2.5))
+    ax4.set_xticklabels([f'{x:.1f}' for x in np.arange(0, 2.6, 0.5)], fontsize=23)
+    ax4.set_ylim(0, 105)
+    ax4.grid(True, alpha=0.3, axis='y')
+    
+    # Plot 5: Cumulative Distribution Function (from station_view)
+    ax5 = plt.subplot(5, 1, 5)
+    cdf_values = bin_stats['cdf'].values
+    
+    ax5.plot(x_pos, cdf_values, 
+            marker='o', markersize=6, linewidth=2, color='darkred', 
+            markerfacecolor='red', markeredgecolor='darkred', markeredgewidth=1.0)
+    ax5.fill_between(x_pos, 0, cdf_values, alpha=0.15, color='darkred')
+    
+    ax5.set_xlabel('Normalized Trains\nin System (tph/platform)', fontsize=23)
+    ax5.set_ylabel('Cumulative\nDistribution (%)', fontsize=23)
+    ax5.tick_params(axis='both', labelsize=23)
+    ax5.set_xticks(x_pos)
+    ax5.set_xticklabels(bin_stats['load_bin'], rotation=0, fontsize=23)
+    ax5.set_xlim(-0.5, 12)
+    ax5.set_xticks(np.arange(0, 13, 2.5))
+    ax5.set_xticklabels([f'{x:.1f}' for x in np.arange(0, 2.6, 0.5)], fontsize=23)
+    ax5.set_ylim(0, 105)
+    ax5.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.show()
+    
+    print(f"\nComprehensive analysis complete!")
+    
+    return {
+        'delay_analysis': delay_analysis_result,
+        'outlier_analysis': outlier_analysis_result,
+        'station_view_analysis': station_view_result
+    }
+
+print("comprehensive_station_analysis function defined successfully!")
