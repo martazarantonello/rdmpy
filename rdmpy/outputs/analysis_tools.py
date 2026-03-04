@@ -4008,12 +4008,7 @@ def station_view(station_id, all_data, num_platforms=6, time_window_minutes=60, 
         # On-time performance
         ontime_mask = (in_system['delay_minutes'].isna()) | (in_system['delay_minutes'] == 0.0)
         ontime_trains_count = in_system[ontime_mask]['TRAIN_SERVICE_CODE'].nunique()
-        ontime_ratio = ontime_trains_count / trains_in_system if trains_in_system > 0 else 0
         is_100_percent_ontime = (ontime_trains_count == trains_in_system)
-        
-        # On-time trains normalized: Show as percentage of trains in system
-        # This provides more readable values even when on-time performance is low
-        ontime_trains_normalized = ontime_ratio * trains_in_system_normalized
         
         if trains_in_system > 0:
             hourly_stats_list.append({
@@ -4021,10 +4016,9 @@ def station_view(station_id, all_data, num_platforms=6, time_window_minutes=60, 
                 'trains_in_system_normalized': trains_in_system_normalized,
                 'total_trains': trains_in_system,
                 'ontime_trains_count': ontime_trains_count,
-                'ontime_trains_normalized': ontime_trains_normalized,
+                'ontime_trains_normalized': ontime_trains_count / num_platforms,
                 'is_100_percent_ontime': is_100_percent_ontime,
-                'ontime_ratio': ontime_ratio,
-                'ontime_percentage': ontime_ratio * 100  # Also store as percentage
+                'ontime_ratio': ontime_trains_count / trains_in_system
             })
     
     hourly_stats = pd.DataFrame(hourly_stats_list)
@@ -4033,36 +4027,36 @@ def station_view(station_id, all_data, num_platforms=6, time_window_minutes=60, 
         print("No statistics to plot.")
         return None
     
-    print(f" Processed {len(hourly_stats)} hours with comprehensive statistics\n")
+    print(f"Processed {len(hourly_stats)} hours with comprehensive statistics\n")
     
-    # Plot 1: On-Time Performance vs System Load =====
+    # ===== PLOT 1: On-Time Performance vs System Load =====
     fig1, ax1 = plt.subplots(1, 1, figsize=figsize)
     
     ax1.scatter(hourly_stats['trains_in_system_normalized'], 
-               hourly_stats['ontime_percentage'],  # Show as percentage, not absolute count
+               hourly_stats['ontime_trains_normalized'],
                c='cornflowerblue', alpha=0.6, s=30,
                edgecolors='black', linewidth=0.5)
     
-    max_val = hourly_stats['trains_in_system_normalized'].max()
-    ax1.plot([0, max_val], [0, 100], 'g--', linewidth=1.5, alpha=0.7, label='Perfect on-time')
+    max_val = max(hourly_stats['trains_in_system_normalized'].max(), 
+                  hourly_stats['ontime_trains_normalized'].max())
+    ax1.plot([0, max_val], [0, max_val], 'g--', linewidth=1.5, alpha=0.7)
     
-    z = np.polyfit(hourly_stats['trains_in_system_normalized'], hourly_stats['ontime_percentage'], 1)
+    z = np.polyfit(hourly_stats['trains_in_system_normalized'], hourly_stats['ontime_trains_normalized'], 1)
     p = np.poly1d(z)
     x_trend = np.linspace(hourly_stats['trains_in_system_normalized'].min(), 
                          hourly_stats['trains_in_system_normalized'].max(), 100)
-    ax1.plot(x_trend, p(x_trend), "r-", linewidth=1.5, alpha=0.8, label='Trend')
+    ax1.plot(x_trend, p(x_trend), "r-", linewidth=1.5, alpha=0.8)
     
     ax1.set_xlabel('Normalized Trains\nin System (tph/platform)', fontsize=23)
-    ax1.set_ylabel('On-Time\nPerformance (%)', fontsize=23)
+    ax1.set_ylabel('On-Time Trains\n(tph/platform)', fontsize=23)
     ax1.tick_params(axis='both', labelsize=23)
     ax1.grid(True, alpha=0.3)
     ax1.set_xlim(0, 2.5)
-    ax1.set_ylim(-10, 110)
-    ax1.legend(fontsize=10)
+    ax1.set_ylim(0, 2.5)
     
     plt.tight_layout()
     plt.show()
-    print(" Plot 1 complete: On-Time Performance vs System Load\n")
+    print("Plot 1 complete: On-Time Performance vs System Load\n")
     
     # ===== PLOT 2: On-Time Performance Histogram =====
     bin_width = 0.2
@@ -4077,24 +4071,24 @@ def station_view(station_id, all_data, num_platforms=6, time_window_minutes=60, 
                                        include_lowest=True)
     
     bin_stats = hourly_stats.groupby('load_bin', observed=True).agg(
-        total_hours=('ontime_ratio', 'count'),
-        hours_high_ontime=('ontime_ratio', lambda x: (x >= 0.80).sum()),  # Hours with >= 80% on-time
+        total_hours=('is_100_percent_ontime', 'count'),
+        hours_100_percent=('is_100_percent_ontime', 'sum'),
         mean_ontime_ratio=('ontime_ratio', 'mean'),
         std_ontime_ratio=('ontime_ratio', 'std')
     ).reset_index()
     
-    bin_stats['pct_hours_high_ontime'] = (bin_stats['hours_high_ontime'] / bin_stats['total_hours'] * 100)
+    bin_stats['pct_hours_100_ontime'] = (bin_stats['hours_100_percent'] / bin_stats['total_hours'] * 100)
     bin_stats['cumulative_hours'] = bin_stats['total_hours'].cumsum()
     bin_stats['cdf'] = (bin_stats['cumulative_hours'] / bin_stats['total_hours'].sum() * 100)
     
     fig2, ax2 = plt.subplots(1, 1, figsize=figsize)
     
     x_pos = np.arange(len(bin_stats))
-    bars = ax2.bar(x_pos, bin_stats['pct_hours_high_ontime'], 
+    bars = ax2.bar(x_pos, bin_stats['pct_hours_100_ontime'], 
                    color='cornflowerblue', alpha=0.7, edgecolor='black', linewidth=1.0, width=0.6)
     
     ax2.set_xlabel('Normalized Trains\nin System (tph/platform)', fontsize=23)
-    ax2.set_ylabel('% of Hours\n>= 80% On-Time', fontsize=23)
+    ax2.set_ylabel('% of Hours\n100% On-Time', fontsize=23)
     ax2.tick_params(axis='both', labelsize=23)
     ax2.set_xticks(x_pos)
     ax2.set_xticklabels(bin_stats['load_bin'], rotation=0, fontsize=23)
@@ -4106,7 +4100,7 @@ def station_view(station_id, all_data, num_platforms=6, time_window_minutes=60, 
     
     plt.tight_layout()
     plt.show()
-    print(" Plot 2 complete: On-Time Performance Histogram\n")
+    print("Plot 2 complete: On-Time Performance Histogram\n")
     
     # ===== PLOT 3: Cumulative Distribution Function (CDF) =====
     fig3, ax3 = plt.subplots(1, 1, figsize=figsize)
@@ -4134,14 +4128,11 @@ def station_view(station_id, all_data, num_platforms=6, time_window_minutes=60, 
     
     # Print summary statistics
     print(f"\n{'='*80}")
-    print(f"COMPREHENSIVE STATION ANALYSIS SUMMARY FOR STATION {station_id}")
+    print(f" COMPREHENSIVE STATION ANALYSIS SUMMARY FOR STATION {station_id}")
     print(f"{'='*80}")
     
     print(f"\nON-TIME PERFORMANCE:")
     print(f"  - Hours with 100% on-time: {hourly_stats['is_100_percent_ontime'].sum()} ({100*hourly_stats['is_100_percent_ontime'].sum()/len(hourly_stats):.1f}%)")
-    high_ontime = (hourly_stats['ontime_ratio'] >= 0.80).sum()
-    print(f"  - Hours with >= 80% on-time: {high_ontime} ({100*high_ontime/len(hourly_stats):.1f}%)")
-    print(f"  - Average on-time ratio: {hourly_stats['ontime_ratio'].mean():.1%}")
     
     print(f"\nSYSTEM LOAD:")
     print(f"  - Min normalized trains/platform: {hourly_stats['trains_in_system_normalized'].min():.2f}")
