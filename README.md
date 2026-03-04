@@ -20,7 +20,7 @@ If you have any enquires, please contact [ji-eun.byun@glasgow.ac.uk](mailto:ji-e
 To use this tool, you need to download the NWR Historic Delay Attribution data from Network Rail and NWR Schedule data (or your organisation's portal). You can access these files from the Rail Data Marketplace (RDM) platform here: https://raildata.org.uk/. 
 >  The data is not included in this repository due to licensing and size restrictions.
 
-1. Create a `data/` folder in the project root if it doesn't exist.
+1. Create a `data/` folder inside the the `demo/` folder if it doesn't exist.
 2. Download the following files and save them in `data/`. Please do not create separate folders within the data folder.
 > For delays, please search "NWR Historic Delay Attribution". Under "data files", you will find .zip files named, for example "202324.zip" for a complete set of one year data. Once you extract all, you will find data files named as :
    - `Transparency_23-24_P12.csv`
@@ -43,7 +43,7 @@ This file contains "toc-full" which stands for Train Operating Companies (TOC) a
  - Run the `data/schedule_cleaning.py` file, where the function clean_schedule is present.
  - This will create the CIF_ALL_FULL_DAILY_toc-full_p4.pkl file
  - This is the cleaned version of the downloaded schedule file in .json.gz format. This data file has the suffix "p4" from it being the 4th section in the original schedule file.   
-    The file is a newline-delimited JSON (NDJSON) file containing 5 types:
+    The original file is a newline-delimited JSON (NDJSON) file containing 5 sections:
     1. JsonTimetableV1 - Header/metadata
     2. TiplocV1 - Location codes
     3. JsonAssociationV1 - Train associations
@@ -55,16 +55,16 @@ This file contains "toc-full" which stands for Train Operating Companies (TOC) a
 
 After you have downloaded this data and saved it to the `data/` folder, you need to perform some pre-processing. This is a crucial step in this analysis as you want to match the scheduled trains with delays. The script processes schedule data, applies delays, and saves the results as pandas DataFrames organized by day of the week for each station. Please note, that as of 11th November 2025, this script takes 1 full day to pre-process all the stations. To pre-process the data, you need to run:
 
-> python -m preprocess.preprocessor
+> python -m rdmpy.preprocessor
 
 This can be run with different specifications for the user's needs. Below are defined all its possible usages:
 
-1. To process All categories: python -m preprocess.preprocessor --all-categories
-2. To process a single station: python -m preprocess.preprocessor <STANOX_CODE>
-3. To process Category A stations only : python -m preprocess.preprocessor --category-A
-4. To process Category B stations only: python -m preprocess.preprocessor --category-B
-5. To process Category C1 stations only: python -m preprocess.preprocessor --category-C1
-6. To process Category C2 stations only: python -m preprocess.preprocessor --category-C2
+1. To process All categories: python -m rdmpy.preprocessor --all-categories
+2. To process a single station: python -m rdmpy.preprocessor <STANOX_CODE>
+3. To process Category A stations only : python -m rdmpy.preprocessor --category-A
+4. To process Category B stations only: python -m rdmpy.preprocessor --category-B
+5. To process Category C1 stations only: python -m rdmpy.preprocessor --category-C1
+6. To process Category C2 stations only: python -m rdmpy.preprocessor --category-C2
 
 This script saves processed schedule and delay data to parquet files for railway stations by DFT category in a `processed_data/` folder. Please note that if you only process one category, and not all the categories, some of the demos described below might not display any data. The only one that will be successful is the station demo as it refers to a singular station's performance assessment.
 
@@ -80,13 +80,13 @@ To run the repository, you need the following Python packages:
 
 ## Tool Demos and Outputs
 
-After you have downloaded and saved the raw data, and pre-processed it using the preprocessor tool, you can make use of the demos for the actual network analysis. To do so, you need to load the data you have just pre-processed. In the `outputs/` folder you can find two files:
+After you have downloaded and saved the raw data, and pre-processed it using the preprocessor tool, you can make use of the demos for the actual network analysis. To do so, you need to load the data you have just pre-processed. In the `rdmpy/` folder, the`outputs/` folder you can find two files:
 
 - load_data.py
-- utils.py
+- analysis_tools.py
 
-The load_data.py is a script that defines the function load_processed_data which is called at the start of every demo in the `demos/` folder. In the same way, the utils.py is a script that contains all needed functions that make the demos for this analysis possible. These functions will also be called at the beginning of every demo, according to their respective usage. 
-In the `demos/` folder, you can find all 5 demos defined by this analysis. These demos are:
+The load_data.py is a script that defines the function load_processed_data which is called at the start of every demo in the `demo/` folder. In the same way, the analysis_tools.py is a script that contains all needed functions that make the demos for this analysis possible. These functions will also be called at the beginning of every demo, according to their respective usage. 
+In the `demo/` folder, you can find all 5 demos defined by this analysis. These demos are:
 
 1. Aggregate View
 2. Incident View
@@ -100,29 +100,8 @@ Each demo is concerned with a different aspect of network analysis and granulari
 
 This project includes a comprehensive test suite to ensure code quality and reliability.
 
-**82 tests** covering the preprocessor module functions (79% coverage).
+In the `tests/` folder, each key file has been tested and its script has been named respectively according to clean code practises.
 
-### Run Tests
-```bash
-# Run all tests
-pytest
-
-# Run with details
-pytest -v
-
-# Run specific test file
-pytest tests/test_preprocessor_utils.py
-```
-
-**All tests are passing ✅**
-
-For detailed testing documentation, see [tests/README.md](tests/README.md).
-
-### VS Code Integration
-- Click the **Testing** icon (beaker) in the sidebar
-- If tests don't appear: Reload window (`Ctrl+Shift+P` → "Reload Window")
-- Click refresh button in Testing panel
-
-**Tip:** If VS Code Test Explorer has issues, use the terminal - it always works!
+All tests are performed using pytest and can be run successfully.
 
 
