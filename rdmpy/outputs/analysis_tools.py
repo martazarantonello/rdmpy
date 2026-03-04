@@ -47,8 +47,6 @@ def _load_station_files_and_filter_incident(processed_base, incident_number, fil
     station_dirs = [d for d in os.listdir(processed_base) 
                    if os.path.isdir(os.path.join(processed_base, d))]
     
-    print(f"Found {len(station_dirs)} station directories")
-    
     all_incidents = []
     files_processed = 0
     files_with_data = 0
@@ -109,10 +107,7 @@ def _load_station_files_and_filter_incident(processed_base, incident_number, fil
                             all_incidents.extend(filtered_data.to_dict('records'))
                         
             except Exception as e:
-                print(f"Error processing file {file_path}: {str(e)[:100]}...")
                 continue
-    
-    print(f"Processed {files_processed} files, {files_with_data} files had matching data")
     return all_incidents, files_processed, files_with_data
 
 
@@ -495,13 +490,10 @@ def _load_station_coordinates_from_json():
         file_path = reference_files["all dft categories"]
         
         if not os.path.exists(file_path):
-            print(f"File does not exist: {file_path}")
             return None
             
         with open(file_path, 'r') as f:
             stations_coords_data = json.load(f)
-        
-        print(f"Successfully loaded {len(stations_coords_data)} station records")
         
         # Filter to valid categories (A, B, C1, C2) with coordinates
         valid_categories = {'A', 'B', 'C1', 'C2'}
@@ -530,11 +522,9 @@ def _load_station_coordinates_from_json():
                     except ValueError:
                         continue
         
-        print(f"Found coordinates for {len(all_station_coords_map)} stations (DFT categories A/B/C1/C2)")
         return all_station_coords_map
         
     except Exception as e:
-        print(f"Error loading station coordinates: {e}")
         return None
 
 
@@ -552,7 +542,6 @@ def _parse_heatmap_analysis_parameters(analysis_date, analysis_hhmm, period_minu
         
         return analysis_datetime, analysis_end, num_intervals, analysis_day_suffix
     except ValueError:
-        print(f"Error: Invalid analysis date/time format.")
         return None, None, None, None
 
 
@@ -659,7 +648,7 @@ def _get_incident_location_coordinates(incident_section_code):
                             break
                 
         except Exception as e:
-            print(f"Warning: Could not load incident location coordinates: {e}")
+            pass
     
     return incident_locations, incident_station_name
 
@@ -710,15 +699,13 @@ def _load_all_station_day_files(station_folder):
                 day_data = pd.read_parquet(file_path, engine='fastparquet')
                 day_data['day_of_week'] = day_file.replace('.parquet', '')
                 all_station_data.append(day_data)
-                print(f"Loaded {len(day_data)} records from {day_file}")
             except Exception as e:
-                print(f"Error loading {day_file}: {e}")
+                pass
     
     if not all_station_data:
         return None
     
     combined_data = pd.concat(all_station_data, ignore_index=True)
-    print(f"Total combined records: {len(combined_data)}")
     return combined_data
 
 
@@ -752,7 +739,6 @@ def _separate_incident_and_normal_operations(combined_data):
     incident_data = all_train_data[incident_mask].copy()
     normal_data = all_train_data[~incident_mask].copy()
     
-    print(f"Incident-related records: {len(incident_data)}, Normal: {len(normal_data)}")
     return incident_data, normal_data
 
 
@@ -856,7 +842,6 @@ def aggregate_view(incident_number, start_date):
     # Step 1: Locate and load data
     processed_base = find_processed_data_path()
     if processed_base is None:
-        print("No processed_data directory found. Please run the preprocessor first.")
         return None
     
     all_incidents, files_processed, files_with_data = _load_station_files_and_filter_incident(
@@ -864,12 +849,10 @@ def aggregate_view(incident_number, start_date):
     )
     
     if not all_incidents:
-        print(f"No incidents found for INCIDENT_NUMBER {incident_number} on {start_date}")
         return None
     
     # Step 2: Convert to DataFrame and parse datetimes
     df = pd.DataFrame(all_incidents)
-    print(f"Total records found: {len(df)}")
     
     target_date = datetime.strptime(start_date, '%d-%b-%Y').date()
     base_datetime = datetime.combine(target_date, datetime.min.time())
@@ -1053,22 +1036,17 @@ def _load_and_prepare_multiday_data(incident_number):
     processed_base = find_processed_data_path()
     
     if processed_base is None:
-        print("No processed_data directory found. Please run the preprocessor first.")
         return None
     
     all_incidents, files_processed, files_with_data = _load_station_files_for_multiday_incident(
         processed_base, incident_number
     )
     
-    print(f"Found {len(all_incidents)} incident records from {files_processed} files ({files_with_data} with data)")
-    
     if not all_incidents:
-        print(f"No incidents found for INCIDENT_NUMBER {incident_number}")
         return None
     
     # Parse datetime and identify unique dates
     df = pd.DataFrame(all_incidents)
-    print(f"Total records found: {len(df)}")
     
     df['full_datetime'] = pd.to_datetime(df['EVENT_DATETIME'], format='%d-%b-%Y %H:%M', errors='coerce')
     df = df.dropna(subset=['full_datetime']).sort_values('full_datetime')
@@ -1078,14 +1056,7 @@ def _load_and_prepare_multiday_data(incident_number):
     unique_dates = sorted(df['event_date_only'].dropna().unique())
     num_days = len(unique_dates)
     
-    print(f"Incident spans {num_days} day(s): {[d.strftime('%d-%b-%Y') for d in unique_dates]}")
-    
     # Check if incident spans more than 3 days
-    if num_days > 3:
-        print(f"\n⚠️  WARNING: This incident spans {num_days} days!")
-        print(f"   The same incident number may refer to multiple separate incidents.")
-        print(f"   Date range: {unique_dates[0].strftime('%d-%b-%Y')} to {unique_dates[-1].strftime('%d-%b-%Y')}")
-        print(f"   Please verify this is a single continuous incident.\n")
     
     # Parse INCIDENT_START_DATETIME and filter events before incident start
     if 'INCIDENT_START_DATETIME' in df.columns:
@@ -1099,7 +1070,7 @@ def _load_and_prepare_multiday_data(incident_number):
             records_filtered = records_before_filtering - len(df)
             
             if records_filtered > 0:
-                print(f"Filtered out {records_filtered} event(s) before incident start ({earliest_incident_start.strftime('%d-%b-%Y %H:%M')})")
+                pass
             
             df['event_date_only'] = df['full_datetime'].dt.date
             unique_dates = sorted(df['event_date_only'].dropna().unique())
@@ -1432,7 +1403,6 @@ def incident_view(incident_code, incident_date, analysis_date, analysis_hhmm, pe
     try:
         analysis_datetime = datetime.strptime(f"{analysis_date} {analysis_hhmm[:2]}:{analysis_hhmm[2:]}", '%d-%b-%Y %H:%M')
     except ValueError:
-        print(f"Error: Invalid analysis date/time format. Use 'DD-MMM-YYYY' for date and 'HHMM' for time.")
         return pd.DataFrame(), None, None
     
     analysis_end = analysis_datetime + timedelta(minutes=period_minutes)
@@ -1443,14 +1413,9 @@ def incident_view(incident_code, incident_date, analysis_date, analysis_hhmm, pe
     processed_base = find_processed_data_path()
     
     if processed_base is None:
-        print("No processed_data directory found. Please run the preprocessor first.")
         return pd.DataFrame(), None, None
     
     target_files = _get_target_files_for_day(processed_base, analysis_day_suffix)
-    
-    print(f"Analyzing incident {incident_code} (started {incident_date})")
-    print(f"Analysis period: {analysis_period_str}")
-    print(f"Loading {len(target_files)} station files for {analysis_day_suffix}")
     
     # Step 3: Extract incident metadata and calculate metrics
     incident_start_time = None
@@ -1483,7 +1448,7 @@ def incident_view(incident_code, incident_date, analysis_date, analysis_hhmm, pe
                 
                 incident_start_dt = datetime.strptime(incident_start_time, '%d-%b-%Y %H:%M')
                 if analysis_datetime < incident_start_dt:
-                    print(f"Warning: Analysis time is before incident start ({incident_start_dt.strftime('%d-%b-%Y %H:%M')})")
+                    pass
             
             # Step 4: Calculate metrics using helpers
             planned_calls = _calculate_planned_calls(df, incident_delay_day, analysis_datetime, analysis_end)
@@ -1510,20 +1475,13 @@ def incident_view(incident_code, incident_date, analysis_date, analysis_hhmm, pe
     
     # Step 6: Handle case where no incident was found
     if incident_start_time is None:
-        print(f"Incident {incident_code} not found on {incident_date}")
         return pd.DataFrame(), None, None
     
     # Step 7: Get station name and print incident details
     incident_station_name = _get_station_name_from_reference(incident_section_code)
     
-    print(f"Incident Details:")
-    print(f"  Section Code: {incident_section_code}" + (f" ({incident_station_name})" if incident_station_name else ""))
-    print(f"  Incident Reason: {incident_reason}")
-    print(f"  Started: {incident_start_time}")
-    
     # Step 8: Build and return results
     if not station_results:
-        print(f"No station activity found during analysis period")
         return pd.DataFrame(), incident_start_time, analysis_period_str
     
     result_df = pd.DataFrame(station_results)
@@ -1586,7 +1544,7 @@ def _prepare_heatmap_json_and_markers(incident_code, incident_section_code, inci
             incident_markers_js += f'''
             var incidentMarker{i} = L.marker([{loc['lat']}, {loc['lon']}], {{
                 icon: L.divIcon({{
-                    html: '<div style="font-size: 24px; color: red; font-weight: bold;">✕</div>',
+                    html: '<div style="font-size: 24px; color: red; font-weight: bold;">X</div>',
                     className: 'incident-marker',
                     iconSize: [30, 30],
                     iconAnchor: [15, 15]
@@ -1952,7 +1910,7 @@ def _generate_heatmap_html_visualization(incident_code, analysis_date, analysis_
                 document.getElementById('station-info').innerHTML = stationInfoHtml;
                 
             }} catch (error) {{
-                console.error('❌ Error updating heatmap:', error);
+                console.error('Error updating heatmap:', error);
                 document.getElementById('station-info').innerHTML = 'Error updating heatmap: ' + error.message;
             }}
         }}
@@ -2000,25 +1958,25 @@ def _generate_heatmap_html_visualization(incident_code, analysis_date, analysis_
             console.log('Timeline data:', Object.keys(timelineData).length);
             
             if (typeof L === 'undefined') {{
-                console.error('❌ Leaflet not loaded!');
+                console.error('Leaflet not loaded!');
                 document.getElementById('station-info').innerHTML = 'Error: Leaflet library not loaded';
                 return;
             }}
             
             if (typeof L.heatLayer === 'undefined') {{
-                console.error('❌ Leaflet.heat plugin not loaded!');
+                console.error('Leaflet.heat plugin not loaded!');
                 document.getElementById('station-info').innerHTML = 'Error: Leaflet.heat plugin not loaded';
                 return;
             }}
             
             if (timeSteps.length === 0) {{
-                console.error('❌ No time steps available!');
+                console.error('No time steps available!');
                 document.getElementById('station-info').innerHTML = 'No time data available';
             }} else if (Object.keys(stationCoords).length === 0) {{
-                console.error('❌ No station coordinates available!');
+                console.error('No station coordinates available!');
                 document.getElementById('station-info').innerHTML = 'No station coordinates available';
             }} else {{
-                console.log('✅ All data loaded successfully, initializing heatmap...');
+                console.log('All data loaded successfully, initializing heatmap...');
                 document.getElementById('timeline').max = timeSteps.length - 1;
                 updateMap(0);
             }}
@@ -2062,16 +2020,8 @@ def _save_heatmap_html_file(html_content, output_file, incident_code, time_steps
         with open(output_file, 'w', encoding='utf-8') as f:
             f.write(html_content)
         
-        print(f"CONTINUOUS HEATMAP CREATED! ")
-        print(f"File: {output_file}")
-        print(f"Time steps: {len(time_steps)} ({interval_minutes}-minute intervals)")
-        print(f"Total stations mapped: {len(all_station_coords_map)} (DFT categories A/B/C1/C2)")
-        print(f"Affected stations: {len(station_timeline_data)}")
-        print(f"Features: Continuous delay heatmap with fading colors + grey station dots overlay")
-        print(" Open the HTML file in your browser to explore the continuous heatmap!")
-        
     except Exception as e:
-        print(f"Error saving file: {e}")
+        pass
 
 def incident_view_heatmap_html(incident_code, incident_date, analysis_date, analysis_hhmm, period_minutes, interval_minutes=10, output_file=None):
     """
@@ -2102,26 +2052,24 @@ def incident_view_heatmap_html(incident_code, incident_date, analysis_date, anal
     if analysis_datetime is None:
         return None
     
-    print(f"Creating heatmap for incident {incident_code}")
-    print(f"Analysis period: {analysis_datetime.strftime('%d-%b-%Y %H:%M')} to {analysis_end.strftime('%d-%b-%Y %H:%M')}")
-    print(f"Interval size: {interval_minutes} minutes, Total intervals: {num_intervals}")
+    # Step 2: Parse parameters
+    analysis_datetime, analysis_end, num_intervals, analysis_day_suffix = \
+        _parse_heatmap_analysis_parameters(analysis_date, analysis_hhmm, period_minutes, interval_minutes)
+    
+    if analysis_datetime is None:
+        return None
     
     # Step 3: Load station files for the analysis day
     processed_base = find_processed_data_path()
     if processed_base is None:
-        print("No processed_data directory found. Please run the preprocessor first.")
         return None
     
     target_files = _load_heatmap_station_files(processed_base, analysis_day_suffix)
-    print(f"Loading {len(target_files)} station files for {analysis_day_suffix}")
     
     # Step 4: Collect delay timeline data for affected stations
     station_timeline_data, incident_section_code, incident_reason, incident_start_time = \
         _collect_heatmap_delay_timeline(target_files, incident_code, incident_date, all_station_coords_map, 
                                         analysis_datetime, analysis_end, interval_minutes)
-    
-    print(f"Found delay data for {len(station_timeline_data)} affected stations")
-    print(f"Incident section: {incident_section_code}, Reason: {incident_reason}, Start: {incident_start_time}")
     
     # Step 5: Get incident location coordinates
     incident_locations, incident_station_name = _get_incident_location_coordinates(incident_section_code)
@@ -2196,14 +2144,10 @@ def train_view(all_data, origin_code, destination_code, input_date_str):
     # Step 3: Validate OD pair exists
     if od_pair not in all_data['OD_PAIR'].unique():
         message = f"OD pair {od_pair} not found in dataset."
-        print(message)
         return message
     
     # Step 4: Filter by OD pair
     trains_between = all_data[all_data['OD_PAIR'] == od_pair].copy()
-    
-    print(f"Train journeys between {origin_code} and {destination_code}: {len(trains_between)} records found.")
-    print(f"Unique train service codes: {trains_between['TRAIN_SERVICE_CODE'].dropna().unique().tolist()}")
     
     # Step 5: Correct PLANNED_CALLS = ACTUAL_CALLS - PFPI_MINUTES
     trains_between['ACTUAL_CALLS_dt'] = pd.to_datetime(trains_between['ACTUAL_CALLS'], format='%H%M', errors='coerce')
@@ -2221,11 +2165,9 @@ def train_view(all_data, origin_code, destination_code, input_date_str):
     
     if incidents_on_date.empty:
         message = f"No incidents found for OD pair {od_pair} on {input_date_str}."
-        print(message)
         return message
     
     # Step 7: Display results
-    print(f"{len(incidents_on_date)} incident(s) found for OD pair {od_pair} on {input_date_str}:")
     
     cols_to_show = [
         'TRAIN_SERVICE_CODE', 'PLANNED_ORIGIN_LOCATION_CODE', 'PLANNED_ORIGIN_GBTT_DATETIME',
@@ -2269,8 +2211,7 @@ def get_stanox_for_service(all_data, train_service_code, origin_code, destinatio
     ].copy()
 
     if subset.empty:
-        message = f"🚫 No records found for train service {train_service_code} on OD pair {od_pair}."
-        print(message)
+        message = f"No records found for train service {train_service_code} on OD pair {od_pair}."
         return message
 
     # --- Filter by date if provided ---
@@ -2281,13 +2222,8 @@ def get_stanox_for_service(all_data, train_service_code, origin_code, destinatio
             
             if not date_subset.empty:
                 subset = date_subset
-                print(f"✅ Filtered to date: {date_str}")
-            else:
-                print(f"⚠️ No records found for date {date_str}, using all dates for this service")
-        except Exception as e:
-            print(f"⚠️ Error filtering by date {date_str}: {e}, using all dates")
-
-    # --- Get all unique STANOX codes with valid scheduled calls ---
+        except Exception:
+            pass
     # Filter to rows that have actual scheduled stops (PLANNED_CALLS)
     valid_stops = subset[subset['PLANNED_CALLS'].notna()].copy()
     
@@ -2303,18 +2239,11 @@ def get_stanox_for_service(all_data, train_service_code, origin_code, destinatio
     # Get unique STANOX codes
     stanox_list = all_stops['STANOX'].astype(str).unique().tolist()
     
-    # Ensure origin and destination are included
-    origin_str = str(origin_code)
+    # Ensure destination is included (journey endpoint)
     dest_str = str(destination_code)
-    
-    if origin_str not in stanox_list:
-        stanox_list.append(origin_str)
     if dest_str not in stanox_list:
         stanox_list.append(dest_str)
     
-    print(f"✅ Retrieved ALL stations for service {train_service_code} on OD pair {od_pair}")
-    print(f"   Total unique stations: {len(stanox_list)}")
-    print(f"   Stations: {stanox_list}")
     return stanox_list
 
 
@@ -2344,16 +2273,8 @@ def _prepare_journey_map_data(all_stanox, station_ref):
                 stanox_names[s_str] = station_name
             except Exception:
                 continue
-        else:
-            print(f"⚠️ Warning: No coordinates found for STANOX {s_str}")
-    
-    if stanox_coords:
-        print(f"📍 Found {len(stanox_coords)} stations with coordinates")
-        for i, (stanox, _, _) in enumerate(stanox_coords[:5]):
-            station_name = stanox_names.get(stanox, "Unknown")
-            print(f"   {i+1}. {station_name} ({stanox})")
         if len(stanox_coords) > 5:
-            print(f"   ... and {len(stanox_coords) - 5} more")
+            pass
     
     return stanox_coords, stanox_names
 
@@ -2376,10 +2297,7 @@ def _compute_station_route_connections(stanox_coords, stanox_names):
     connections = []
     
     if len(stanox_coords) <= 1:
-        print(f"   ⚠️ Only {len(stanox_coords)} station(s), no connections to draw")
         return connections
-    
-    print(f"🔗 Computing route connections based on geographic proximity...")
     
     # Extract coordinates for distance calculation
     coords_array = np.array([(lat, lon) for _, lat, lon in stanox_coords])
@@ -2408,7 +2326,6 @@ def _compute_station_route_connections(stanox_coords, stanox_names):
                     start_name, end_name
                 ))
     
-    print(f"   ✅ Created {len(connections)} route connections based on minimum spanning tree")
     return connections
 
 
@@ -2601,7 +2518,6 @@ def _create_incident_markers_on_map(m, incident_records, station_ref, incident_r
         }
         section_map.setdefault(section, []).append(entry)
     
-    print(f"📍 Creating incident markers for {len(section_map)} sections...")
     markers_created = 0
     
     for section_code, entries in section_map.items():
@@ -2671,8 +2587,6 @@ def _create_incident_markers_on_map(m, incident_records, station_ref, incident_r
                     popup=folium.Popup(station_popup, max_width=450)
                 ).add_to(m)
                 markers_created += 1
-    
-    print(f"✅ Created {markers_created} incident markers on map")
 
 
 def _finalize_journey_map(m):
@@ -2750,16 +2664,11 @@ def map_train_journey_with_incidents(
                     additional_stanox.add(stanox_str)
     
     all_stanox = service_stanox_normalized.union(additional_stanox)
-    print(f"📊 Total unique stations: {len(all_stanox)}")
-    print(f"   - From service: {len(service_stanox_normalized)}")
-    print(f"   - From incidents: {len(additional_stanox)}")
-    print(f"   - Combined: {len(all_stanox)}")
     
     # STEP 2: Build station coordinates and names
     stanox_coords, stanox_names = _prepare_journey_map_data(all_stanox, station_ref)
     
     if not stanox_coords:
-        print("⚠️ No coordinates found for any STANOX in this service.")
         return None
     
     # STEP 3: Create base map with title
@@ -2794,7 +2703,6 @@ def map_train_journey_with_incidents(
     # STEP 8: Add legend and finalize
     _finalize_journey_map(m)
     
-    print("✅ Map created with proximity-based connections!")
     return m
 
 def train_view_2(all_data, service_stanox, service_code, stations_ref_path=None):
@@ -2838,7 +2746,7 @@ def train_view_2(all_data, service_stanox, service_code, stations_ref_path=None)
             additional_stanox.add(stanox_str)
         
         if additional_stanox:
-            print(f"📍 Found {len(additional_stanox)} additional stations with delays for service {service_code}")
+            pass
     
     # Merge service_stanox with additional stations
     service_stanox_normalized = set()
@@ -2847,10 +2755,6 @@ def train_view_2(all_data, service_stanox, service_code, stations_ref_path=None)
         service_stanox_normalized.add(s_str)
     
     all_stanox = service_stanox_normalized.union(additional_stanox)
-    print(f"📊 Total unique stations for analysis: {len(all_stanox)}")
-    print(f"   - From service route: {len(service_stanox_normalized)}")
-    print(f"   - With delays: {len(additional_stanox)}")
-    print(f"   - Combined: {len(all_stanox)}")
 
     results = []
 
@@ -2926,7 +2830,7 @@ def plot_reliability_graphs(all_data, service_stanox, service_code, stations_ref
             additional_stanox.add(stanox_str)
         
         if additional_stanox:
-            print(f"📍 Found {len(additional_stanox)} additional stations with delays for plotting")
+            pass
     
     # Merge service_stanox with additional stations
     service_stanox_normalized = set()
@@ -2935,7 +2839,6 @@ def plot_reliability_graphs(all_data, service_stanox, service_code, stations_ref
         service_stanox_normalized.add(s_str)
     
     all_stanox = service_stanox_normalized.union(additional_stanox)
-    print(f"📊 Plotting delay distributions for {len(all_stanox)} stations")
 
     station_labels = []
     delay_data = []
@@ -2962,7 +2865,7 @@ def plot_reliability_graphs(all_data, service_stanox, service_code, stations_ref
         delay_data.append(delays)
 
     if not station_labels:
-        print('No data to plot.')
+        pass
         return
 
     # Graph 1: Overlapping density plots (KDE) per station
@@ -3063,10 +2966,10 @@ def _print_date_statistics(date_str, all_data):
         reason_counts = date_data.groupby('INCIDENT_REASON')['INCIDENT_NUMBER'].nunique().sort_values(ascending=False).head(5)
         top_reasons = ', '.join([f"{reason}({count})" for reason, count in reason_counts.items()])
         
-        print(f"{date_str} - {incident_count:,} incidents")
-        print(f"    Top reasons: {top_reasons}")
+        pass
+        pass
     else:
-        print(f"{date_str} - No incidents with PFPI > 5 min found")
+        pass
     
     return date_data
 
@@ -3095,7 +2998,7 @@ def _load_station_coordinates(stations_ref_path=None):
             if 'stanox' in station and 'latitude' in station and 'longitude' in station:
                 stanox_to_coords[str(station['stanox'])] = [station['latitude'], station['longitude']]
     except Exception as e:
-        print(f"Error loading coordinates: {e}")
+        pass
         return {}
     
     return stanox_to_coords
@@ -3116,7 +3019,7 @@ def _aggregate_time_view_data(date_str, all_data):
     filtered_data = all_data[all_data['INCIDENT_START_DATETIME'].str.contains(date_str, na=False)]
     
     if filtered_data.empty:
-        print(f"No data found for date {date_str}")
+        pass
         return None, None, None
     
     # Get unique affected STANOX codes
@@ -3189,7 +3092,7 @@ def _create_time_view_markers(m, affected_stanox, incident_counts, total_pfpi, s
                 popup=f"STANOX: {stanox_str}<br>Incidents: {count}<br>Total Delay: {total_delay:.1f} min"
             ).add_to(m)
         else:
-            print(f"Coordinates not found for STANOX: {stanox_str}")
+            pass
 
 
 def _finalize_time_view_map(m, date_str):
@@ -3228,7 +3131,7 @@ def _finalize_time_view_map(m, date_str):
     # Save the map to HTML file
     output_file = f"time_view_{date_str.replace('-', '_')}.html"
     m.save(output_file)
-    print(f"Map saved to {output_file}")
+    pass
 
 
 def create_time_view_html(date_str, all_data):
@@ -3283,7 +3186,7 @@ def station_view_yearly(station_id, interval_minutes=30):
     station_folder = os.path.join(processed_base, station_id)
     
     if not os.path.exists(station_folder):
-        print(f"Station folder not found: {station_folder}")
+        pass
         return None, None
     
     # Define day files to load
@@ -3298,19 +3201,15 @@ def station_view_yearly(station_id, interval_minutes=30):
                 day_data = pd.read_parquet(file_path, engine='fastparquet')
                 day_data['day_of_week'] = day_file.replace('.parquet', '')
                 all_station_data.append(day_data)
-                print(f"Loaded {len(day_data)} records from {day_file}")
+                pass
             except Exception as e:
-                print(f"Error loading {day_file}: {e}")
-        else:
-            print(f"File not found: {day_file}")
+                pass
     
     if not all_station_data:
-        print("No data files found for this station")
         return None, None
     
     # Combine all data
     combined_data = pd.concat(all_station_data, ignore_index=True)
-    print(f"Total combined records: {len(combined_data)}")
     
     # Filter for trains with planned calls
     train_mask = combined_data['PLANNED_CALLS'].notna()
@@ -3341,8 +3240,6 @@ def station_view_yearly(station_id, interval_minutes=30):
     incident_data = all_train_data[incident_mask].copy()
     normal_data = all_train_data[~incident_mask].copy()
     
-    print(f"Incident-related records: {len(incident_data)}")
-    print(f"Normal operations records: {len(normal_data)}")
     
     def process_operations_data(data, operation_type):
         """Process data for either incident or normal operations"""
@@ -3449,8 +3346,6 @@ def station_view_yearly(station_id, interval_minutes=30):
     
     return incident_summary, normal_summary
 
-print("station_view_yearly function ready!")
-
 
 
 def plot_trains_in_system_vs_delay(station_id, all_data, time_window_minutes=60, num_platforms=12, 
@@ -3500,28 +3395,15 @@ def plot_trains_in_system_vs_delay(station_id, all_data, time_window_minutes=60,
     plt.style.use('default')
     sns.set_palette("husl")
     
-    print(f"TRAINS IN SYSTEM vs DELAY ANALYSIS FOR STATION {station_id}")
-    print(f"Platforms: {num_platforms}, Assumed Dwell Time: {dwell_time_minutes} min")
-    print(f"Trains in system NORMALIZED by {num_platforms} platforms")
-    print(f"ONE POINT PER HOUR (same as plot_variable_relationships)")
-    print(f"DELAY calculated ONLY from delayed trains (delay > 0)")
-    print("=" * 70)
-    
     # Filter data for the specific station
     data = all_data[all_data['STANOX'] == str(station_id)].copy()
     if len(data) == 0:
-        print(f"No data found for station {station_id}")
         return None
-    
-    print(f"Loaded {len(data)} total records for station {station_id}")
     
     # Filter for arrived trains (exclude cancellations)
     all_arrived_data = data[data['EVENT_TYPE'] != 'C'].copy()
     if len(all_arrived_data) == 0:
-        print("No arrived trains found.")
         return None
-    
-    print(f"Using {len(all_arrived_data)} arrived trains")
     
     # Calculate delays and total time in system
     all_arrived_data['delay_minutes'] = pd.to_numeric(all_arrived_data['PFPI_MINUTES'], errors='coerce').fillna(0)
@@ -3591,10 +3473,7 @@ def plot_trains_in_system_vs_delay(station_id, all_data, time_window_minutes=60,
     valid_data = all_arrived_data.dropna(subset=['arrival_time', 'departure_time']).copy()
     
     if len(valid_data) == 0:
-        print("No valid datetime data.")
         return None
-    
-    print(f"Created {len(valid_data)} valid timestamps")
     
     # Process all data together (merged weekdays and weekends) - ONE POINT PER HOUR
     # Create hourly time bins for the entire period
@@ -3741,7 +3620,7 @@ def plot_trains_in_system_vs_delay(station_id, all_data, time_window_minutes=60,
     
     return hourly_stats
 
-print("plot_trains_in_system_vs_delay function ready!")
+
 
 
 def explore_delay_outliers(station_id, all_data, num_platforms=6, dwell_time_minutes=5, figsize=(12, 8)):
@@ -4003,8 +3882,6 @@ def explore_delay_outliers(station_id, all_data, num_platforms=6, dwell_time_min
     
     return hourly_stats
 
-print("explore_delay_outliers function ready!")
-
 def station_view(station_id, all_data, num_platforms=6, time_window_minutes=60, max_delay_percentile=98, dwell_time_minutes=5, figsize=(8, 4.7)):
     """
     Comprehensive merged station performance analysis combining 3 visualization functions.
@@ -4131,7 +4008,12 @@ def station_view(station_id, all_data, num_platforms=6, time_window_minutes=60, 
         # On-time performance
         ontime_mask = (in_system['delay_minutes'].isna()) | (in_system['delay_minutes'] == 0.0)
         ontime_trains_count = in_system[ontime_mask]['TRAIN_SERVICE_CODE'].nunique()
+        ontime_ratio = ontime_trains_count / trains_in_system if trains_in_system > 0 else 0
         is_100_percent_ontime = (ontime_trains_count == trains_in_system)
+        
+        # On-time trains normalized: Show as percentage of trains in system
+        # This provides more readable values even when on-time performance is low
+        ontime_trains_normalized = ontime_ratio * trains_in_system_normalized
         
         if trains_in_system > 0:
             hourly_stats_list.append({
@@ -4139,9 +4021,10 @@ def station_view(station_id, all_data, num_platforms=6, time_window_minutes=60, 
                 'trains_in_system_normalized': trains_in_system_normalized,
                 'total_trains': trains_in_system,
                 'ontime_trains_count': ontime_trains_count,
-                'ontime_trains_normalized': ontime_trains_count / num_platforms,
+                'ontime_trains_normalized': ontime_trains_normalized,
                 'is_100_percent_ontime': is_100_percent_ontime,
-                'ontime_ratio': ontime_trains_count / trains_in_system
+                'ontime_ratio': ontime_ratio,
+                'ontime_percentage': ontime_ratio * 100  # Also store as percentage
             })
     
     hourly_stats = pd.DataFrame(hourly_stats_list)
@@ -4152,30 +4035,30 @@ def station_view(station_id, all_data, num_platforms=6, time_window_minutes=60, 
     
     print(f" Processed {len(hourly_stats)} hours with comprehensive statistics\n")
     
-    # ===== PLOT 1: On-Time Performance vs System Load =====
+    # Plot 1: On-Time Performance vs System Load =====
     fig1, ax1 = plt.subplots(1, 1, figsize=figsize)
     
     ax1.scatter(hourly_stats['trains_in_system_normalized'], 
-               hourly_stats['ontime_trains_normalized'],
+               hourly_stats['ontime_percentage'],  # Show as percentage, not absolute count
                c='cornflowerblue', alpha=0.6, s=30,
                edgecolors='black', linewidth=0.5)
     
-    max_val = max(hourly_stats['trains_in_system_normalized'].max(), 
-                  hourly_stats['ontime_trains_normalized'].max())
-    ax1.plot([0, max_val], [0, max_val], 'g--', linewidth=1.5, alpha=0.7)
+    max_val = hourly_stats['trains_in_system_normalized'].max()
+    ax1.plot([0, max_val], [0, 100], 'g--', linewidth=1.5, alpha=0.7, label='Perfect on-time')
     
-    z = np.polyfit(hourly_stats['trains_in_system_normalized'], hourly_stats['ontime_trains_normalized'], 1)
+    z = np.polyfit(hourly_stats['trains_in_system_normalized'], hourly_stats['ontime_percentage'], 1)
     p = np.poly1d(z)
     x_trend = np.linspace(hourly_stats['trains_in_system_normalized'].min(), 
                          hourly_stats['trains_in_system_normalized'].max(), 100)
-    ax1.plot(x_trend, p(x_trend), "r-", linewidth=1.5, alpha=0.8)
+    ax1.plot(x_trend, p(x_trend), "r-", linewidth=1.5, alpha=0.8, label='Trend')
     
     ax1.set_xlabel('Normalized Trains\nin System (tph/platform)', fontsize=23)
-    ax1.set_ylabel('On-Time Trains\n(tph/platform)', fontsize=23)
+    ax1.set_ylabel('On-Time\nPerformance (%)', fontsize=23)
     ax1.tick_params(axis='both', labelsize=23)
     ax1.grid(True, alpha=0.3)
     ax1.set_xlim(0, 2.5)
-    ax1.set_ylim(0, 2.5)
+    ax1.set_ylim(-10, 110)
+    ax1.legend(fontsize=10)
     
     plt.tight_layout()
     plt.show()
@@ -4194,24 +4077,24 @@ def station_view(station_id, all_data, num_platforms=6, time_window_minutes=60, 
                                        include_lowest=True)
     
     bin_stats = hourly_stats.groupby('load_bin', observed=True).agg(
-        total_hours=('is_100_percent_ontime', 'count'),
-        hours_100_percent=('is_100_percent_ontime', 'sum'),
+        total_hours=('ontime_ratio', 'count'),
+        hours_high_ontime=('ontime_ratio', lambda x: (x >= 0.80).sum()),  # Hours with >= 80% on-time
         mean_ontime_ratio=('ontime_ratio', 'mean'),
         std_ontime_ratio=('ontime_ratio', 'std')
     ).reset_index()
     
-    bin_stats['pct_hours_100_ontime'] = (bin_stats['hours_100_percent'] / bin_stats['total_hours'] * 100)
+    bin_stats['pct_hours_high_ontime'] = (bin_stats['hours_high_ontime'] / bin_stats['total_hours'] * 100)
     bin_stats['cumulative_hours'] = bin_stats['total_hours'].cumsum()
     bin_stats['cdf'] = (bin_stats['cumulative_hours'] / bin_stats['total_hours'].sum() * 100)
     
     fig2, ax2 = plt.subplots(1, 1, figsize=figsize)
     
     x_pos = np.arange(len(bin_stats))
-    bars = ax2.bar(x_pos, bin_stats['pct_hours_100_ontime'], 
+    bars = ax2.bar(x_pos, bin_stats['pct_hours_high_ontime'], 
                    color='cornflowerblue', alpha=0.7, edgecolor='black', linewidth=1.0, width=0.6)
     
     ax2.set_xlabel('Normalized Trains\nin System (tph/platform)', fontsize=23)
-    ax2.set_ylabel('% of Hours\n100% On-Time', fontsize=23)
+    ax2.set_ylabel('% of Hours\n>= 80% On-Time', fontsize=23)
     ax2.tick_params(axis='both', labelsize=23)
     ax2.set_xticks(x_pos)
     ax2.set_xticklabels(bin_stats['load_bin'], rotation=0, fontsize=23)
@@ -4256,6 +4139,9 @@ def station_view(station_id, all_data, num_platforms=6, time_window_minutes=60, 
     
     print(f"\nON-TIME PERFORMANCE:")
     print(f"  - Hours with 100% on-time: {hourly_stats['is_100_percent_ontime'].sum()} ({100*hourly_stats['is_100_percent_ontime'].sum()/len(hourly_stats):.1f}%)")
+    high_ontime = (hourly_stats['ontime_ratio'] >= 0.80).sum()
+    print(f"  - Hours with >= 80% on-time: {high_ontime} ({100*high_ontime/len(hourly_stats):.1f}%)")
+    print(f"  - Average on-time ratio: {hourly_stats['ontime_ratio'].mean():.1%}")
     
     print(f"\nSYSTEM LOAD:")
     print(f"  - Min normalized trains/platform: {hourly_stats['trains_in_system_normalized'].min():.2f}")
@@ -4269,7 +4155,7 @@ def station_view(station_id, all_data, num_platforms=6, time_window_minutes=60, 
         'bin_stats': bin_stats
     }
 
-print("Merged station_view function defined successfully!")
+
 
 def comprehensive_station_analysis(station_id, all_data, num_platforms=6, dwell_time_minutes=5, max_delay_percentile=98):
     """
@@ -4534,4 +4420,172 @@ def comprehensive_station_analysis(station_id, all_data, num_platforms=6, dwell_
         'station_view_analysis': station_view_result
     }
 
-print("comprehensive_station_analysis function defined successfully!")
+
+
+
+# ============================================================================
+# WRAPPER FUNCTIONS - TIME RANGE FILTERING
+# ============================================================================
+
+def _expand_time_range(time_range):
+    """
+    Normalize time_range to ensure it covers full days.
+    If start == end date, expand end to end of day (23:59:59).
+    
+    Parameters:
+    -----------
+    time_range : tuple or None
+        Tuple of (start, end) as strings or datetime objects
+        Returns None if input is None
+    
+    Returns:
+    --------
+    tuple or None
+        Normalized (start, end) datetimes, or None if input was None
+    """
+    if time_range is None:
+        return None
+    
+    start, end = time_range
+    
+    # Convert strings to pandas Timestamps if needed
+    if isinstance(start, str):
+        start = pd.to_datetime(start).normalize()  # Convert to midnight
+    else:
+        start = pd.Timestamp(start).normalize()
+    
+    if isinstance(end, str):
+        end = pd.to_datetime(end)
+    else:
+        end = pd.Timestamp(end)
+    
+    # If same day, expand end to end of day
+    if start.date() == end.date():
+        end = end.replace(hour=23, minute=59, second=59)
+    
+    return start, end
+
+
+def station_analysis_with_time_range(station_id, all_data, time_range=None, 
+                                     num_platforms=6, dwell_time_minutes=5, 
+                                     max_delay_percentile=98):
+    """
+    Wrapper around comprehensive_station_analysis that adds time_range filtering.
+    
+    Filters data by optional time_range, then calls the original function with
+    the filtered dataset. Original function logic remains unchanged.
+    
+    Parameters:
+    -----------
+    station_id : str
+        The STANOX code for the station
+    all_data : pd.DataFrame
+        Complete dataset with all station data
+    time_range : tuple or None
+        Tuple of (start, end) as dates or datetimes
+        - Dates will be expanded to full day (00:00 to 23:59:59)
+        - Same date for both will cover entire day
+        - None uses all data (default)
+        Examples:
+            ('2024-01-15', '2024-01-15')  # Single day
+            ('2024-01-01', '2024-06-30')  # Date range
+            ('2024-01-15 08:00', '2024-01-15 17:00')  # Specific times
+    num_platforms : int
+        Number of platforms at station (default: 6)
+    dwell_time_minutes : int
+        Typical dwell time at station in minutes (default: 5)
+    max_delay_percentile : int
+        Maximum delay percentile to consider (default: 98)
+    
+    Returns:
+    --------
+    dict
+        Dictionary containing all results from comprehensive_station_analysis
+    """
+    filtered_data = all_data.copy()
+    
+    if time_range is not None:
+        start, end = _expand_time_range(time_range)
+        # Convert EVENT_DATETIME to datetime if it's not already
+        if 'EVENT_DATETIME' in filtered_data.columns:
+            filtered_data['EVENT_DATETIME'] = pd.to_datetime(filtered_data['EVENT_DATETIME'], errors='coerce')
+            # Filter by EVENT_DATETIME column
+            filtered_data = filtered_data[(filtered_data['EVENT_DATETIME'] >= start) & 
+                                     (filtered_data['EVENT_DATETIME'] <= end)].copy()
+            print(f"Filtered to {len(filtered_data)} records from {start} to {end}")
+        else:
+            print("Warning: EVENT_DATETIME column not found. Cannot filter by time range.")
+    
+    # Call original function with filtered data
+    return comprehensive_station_analysis(
+        station_id=station_id,
+        all_data=filtered_data,
+        num_platforms=num_platforms,
+        dwell_time_minutes=dwell_time_minutes,
+        max_delay_percentile=max_delay_percentile
+    )
+
+
+def station_view_yearly_with_time_range(station_id, interval_minutes=30, time_range=None):
+    """
+    Wrapper around station_view_yearly that adds time_range filtering.
+    
+    Calls the original function and filters its results by optional time_range.
+    Original function logic remains unchanged.
+    
+    Parameters:
+    -----------
+    station_id : str
+        The STANOX code for the station
+    interval_minutes : int
+        Interval size for analysis in minutes (default: 30)
+    time_range : tuple or None
+        Tuple of (start, end) as dates or datetimes
+        - Dates will be expanded to full day (00:00 to 23:59:59)
+        - Same date for both will cover entire day
+        - None uses all data (default)
+        Examples:
+            ('2024-01-15', '2024-01-15')  # Single day
+            ('2024-01-01', '2024-06-30')  # Date range
+            ('2024-01-15 08:00', '2024-01-15 17:00')  # Specific times
+    
+    Returns:
+    --------
+    tuple
+        (incident_summary, normal_summary) DataFrames filtered by time_range
+    """
+    # Call original function first
+    incident_summary, normal_summary = station_view_yearly(station_id, interval_minutes)
+    
+    if time_range is not None and incident_summary is not None:
+        start, end = _expand_time_range(time_range)
+        
+        # Determine the datetime column name (adjust if different)
+        # Assuming the summary has a datetime-like column; adapt as needed
+        datetime_col = None
+        for col in ['datetime', 'EVENT_DATETIME', 'time', 'DATETIME']:
+            if col in incident_summary.columns:
+                datetime_col = col
+                break
+        
+        if datetime_col:
+            # Filter both summaries by time range
+            incident_summary = incident_summary[
+                (pd.to_datetime(incident_summary[datetime_col]) >= start) & 
+                (pd.to_datetime(incident_summary[datetime_col]) <= end)
+            ].reset_index(drop=True)
+            
+            if normal_summary is not None and len(normal_summary) > 0:
+                normal_summary = normal_summary[
+                    (pd.to_datetime(normal_summary[datetime_col]) >= start) & 
+                    (pd.to_datetime(normal_summary[datetime_col]) <= end)
+                ].reset_index(drop=True)
+            
+            print(f"Filtered results to range {start} to {end}")
+            print(f"Incident periods after filter: {len(incident_summary)}")
+            if normal_summary is not None:
+                print(f"Normal periods after filter: {len(normal_summary)}")
+        else:
+            print("Warning: Could not find datetime column in results for filtering")
+    
+    return incident_summary, normal_summary
