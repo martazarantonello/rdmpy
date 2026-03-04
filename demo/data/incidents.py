@@ -22,5 +22,5 @@ incident_files = {
     "24-25 P07": DATA_DIR / "Transparency 24-25 P07.csv",
     "24-25 P08": DATA_DIR / "Transparency 24-25 P08.csv",
     "24-25 P09": DATA_DIR / "Transparency 24-25 P09.csv",
-    "24-25 P10": DATA_DIR / "Transparency 24-25 P10.csv", # only data set combined with passenger loadings
+    "24-25 P10": DATA_DIR / "Transparency 24-25 P10.csv",
 }
