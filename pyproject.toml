@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rdmpy"
+version = "0.1.0"
+description = "Reconstruction of Rail Incidents & Delay Propagation in UK"
+authors = [
+    {name = "Marta Zarantonello", email = "m.zarantonello@student.gla.ac.uk"}
+]
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.8"
+keywords = ["railway", "rail", "delay", "incident", "data"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Topic :: Scientific/Engineering",
+]
+
+[project.urls]
+Homepage = "https://github.com/martazarantonello/rdmpy"
+Documentation = "https://martazarantonello.github.io/rdmpy"
+Repository = "https://github.com/martazarantonello/rdmpy"
+
+[tool.setuptools]
+packages = ["rdmpy"]
