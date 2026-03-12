@@ -47,13 +47,13 @@ Key Features
 
 Summary Workflow
 ~~~~~~~~~~~
-Please read all the files contained in the ``docs/`` folder for detailed instructions on how to set up and use the toolkit. The general workflow is as follows:
+Please read all the files contained in the ``docs/`` folder for detailed instructions on how to set up and use the toolkit. Specifically, refer to the :doc:`getting_started` guide for installation and setup instructions, and the :doc:`user_guide` for data preprocessing and analysis instructions. The general workflow is as follows:
 
 1. **Install the toolkit**:
 
    .. code-block:: bash
 
-      pip install -e .
+      pip install rdmpy
 
 2. **Download data** from the `Rail Data Marketplace <https://raildata.org.uk/>`_:
 
