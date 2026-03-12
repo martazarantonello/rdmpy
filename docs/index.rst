@@ -82,6 +82,7 @@ This project is licensed under the MIT License. See the LICENSE file for details
    api
    how_to_contribute
    contributors
+   demo_workflow
 
 Indices and tables
 ==================
