@@ -42,6 +42,7 @@ Verify Installation
 --------------------
 
 After installation, you can verify that rdmpy is installed correctly by running:
+
 .. code-block:: python
 
    import rdmpy
