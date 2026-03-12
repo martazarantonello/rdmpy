@@ -66,13 +66,7 @@ Please read all the files contained in the ``docs/`` folder for detailed instruc
 
       python -m rdmpy.preprocessor --all-categories
 
-4. **Explore the data** using the Jupyter notebooks in the `demo/` folder
-
-   - `aggregate_view.ipynb`: Network-wide performance metrics
-   - `incident_view.ipynb`: Incident-level analysis
-   - `station_view.ipynb`: Station-level performance assessment
-   - `time_view.ipynb`: Temporal patterns of delays
-   - `train_view.ipynb`: Train-level delay propagation
+4. **Explore the data** using the Jupyter notebooks in the `demo/` folder for different analytical perspectives (aggregate, incident, station, time-based, train-level).
 
 5. **Contribute** to the project by following the :doc:`how_to_contribute` guide.
 
