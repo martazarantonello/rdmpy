@@ -2,7 +2,7 @@
 Troubleshooting Guide
 ===============================
 
-This guide covers common issues and best practices when using the RDM Toolkit for rail network analysis.
+This guide covers common issues and best practices when using rdmpy for rail network analysis.
 
 File Naming Issues with Downloaded Data
 ========================================
@@ -25,9 +25,8 @@ The most common variation is **"Transparancy"** where the vowels "a" and "e" are
 **What to Do**
 
 - Before running the preprocessor, manually verify the spelling of all downloaded files in your ``demo/data/`` folder
+- Check the respective already-present python scripts in ``demo/data/`` to ensure they match the expected downloaded file names
 - Rename any files with spelling errors to match the expected ``Transparency_YY-YY_PXX.csv`` pattern
-- Check the RDM platform documentation for the correct file names in your downloaded archives
-- If using automated scripts, validate file names programmatically before processing
 
 **Additional Naming Considerations**
 
@@ -152,9 +151,9 @@ Network Analysis Considerations
 
 **When Interpreting Results**
 
-1. **Account for Data Lag**: The delay attribution data from RDM may have updates. Ensure you are using the latest available data files
+1. **Account for Data Lag**: The delay attribution data from RDM may have updates. Ensure you are using the latest available data files and that the incident files cover a chronological month-to-month period
 
-2. **Station Coverage**: Remember that not all stations may be equally represented. Some stations may have better data quality than others
+2. **Station Coverage**: Remember that not all stations may be equally represented. Some stations may have better data quality than others. This data is operational data, not research-grade, so expect some inconsistencies
 
 3. **Seasonal Patterns**: Results should account for the financial year structure (April to March) when exploring temporal trends
 
@@ -169,8 +168,9 @@ If you encounter issues not covered in this guide:
 
 1. Check the project documentation in the ``docs/`` folder
 2. Review error messages carefully for file path and naming issues
-3. Verify that your data files match the format specified in the README
-4. Contact the project maintainers at `ji-eun.byun@glasgow.ac.uk` with:
+3. Verify that the data formats match the expected structure (e.g., CSV columns, parquet schemas)
+4. Verify that your data files match the format specified in the README
+5. Contact the project maintainers at `ji-eun.byun@glasgow.ac.uk` with:
    - A description of the issue
    - The error message or unexpected behavior
    - Your preprocessing configuration (which stations/categories you processed)
