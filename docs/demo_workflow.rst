@@ -138,7 +138,17 @@ Demo Specifications
        output_file=output_file
    )
 
-*Output: An interactive HTML heatmap file. Open in a browser to explore the spatial-temporal delay propagation.*
+**Interactive Output:** Incident heatmap for incident 62537 on 07-DEC-2024 (24-hour period, 60-min intervals):
+
+.. raw:: html
+
+   <div style="border: 1px solid #ccc; border-radius: 4px; margin: 1em 0; overflow: hidden;">
+     <iframe src="_static/heatmap_incident_62537_07_DEC_2024_0600_period1440min_interval60min.html"
+             width="100%" height="600" frameborder="0"
+             style="border: none;">
+       Your browser does not support iframes. <a href="_static/heatmap_incident_62537_07_DEC_2024_0600_period1440min_interval60min.html">View the heatmap</a>.
+     </iframe>
+   </div>
 
 ---
 
@@ -180,7 +190,46 @@ Demo Specifications
 
    create_time_view_html('28-APR-2024', all_data)
 
-*Output: An interactive HTML map with color-coded station markers. Open in a browser to explore network-wide delays.*
+**Interactive Output:** Network delay map for 28-APR-2024:
+
+.. raw:: html
+
+   <div style="border: 1px solid #ccc; border-radius: 4px; margin: 1em 0; overflow: hidden;">
+     <iframe src="_static/time_view_28_APR_2024.html"
+             width="100%" height="600" frameborder="0"
+             style="border: none;">
+       Your browser does not support iframes. <a href="_static/time_view_28_APR_2024.html">View the map</a>.
+     </iframe>
+   </div>
+
+Additional time view examples are available for other dates of interest:
+
+.. raw:: html
+
+   <details style="margin: 1em 0;">
+     <summary style="cursor: pointer; font-weight: bold; padding: 0.5em;">21-OCT-2024 — Talerddig train collision</summary>
+     <div style="border: 1px solid #ccc; border-radius: 4px; margin: 0.5em 0; overflow: hidden;">
+       <iframe src="_static/time_view_21_OCT_2024.html"
+               width="100%" height="600" frameborder="0"
+               style="border: none;"></iframe>
+     </div>
+   </details>
+   <details style="margin: 1em 0;">
+     <summary style="cursor: pointer; font-weight: bold; padding: 0.5em;">08-APR-2024 — Storm Kathleen (Day 1)</summary>
+     <div style="border: 1px solid #ccc; border-radius: 4px; margin: 0.5em 0; overflow: hidden;">
+       <iframe src="_static/time_view_08_APR_2024.html"
+               width="100%" height="600" frameborder="0"
+               style="border: none;"></iframe>
+     </div>
+   </details>
+   <details style="margin: 1em 0;">
+     <summary style="cursor: pointer; font-weight: bold; padding: 0.5em;">09-APR-2024 — Storm Kathleen (Day 2)</summary>
+     <div style="border: 1px solid #ccc; border-radius: 4px; margin: 0.5em 0; overflow: hidden;">
+       <iframe src="_static/time_view_09_APR_2024.html"
+               width="100%" height="600" frameborder="0"
+               style="border: none;"></iframe>
+     </div>
+   </details>
 
 ---
 
@@ -236,6 +285,18 @@ Demo Specifications
 
    result_table = train_view_2(all_data, service_stanox, service_code)
    plot_reliability_graphs(all_data, service_stanox, service_code)
+
+**Interactive Output:** Train journey map for service 21700001 (12931 → 54311, 07-DEC-2024):
+
+.. raw:: html
+
+   <div style="border: 1px solid #ccc; border-radius: 4px; margin: 1em 0; overflow: hidden;">
+     <iframe src="_static/train_view_21700001_12931_54311_07-DEC-2024.html"
+             width="100%" height="600" frameborder="0"
+             style="border: none;">
+       Your browser does not support iframes. <a href="_static/train_view_21700001_12931_54311_07-DEC-2024.html">View the journey map</a>.
+     </iframe>
+   </div>
 
 .. figure:: _static/demo_train_view_kde.png
    :align: center
