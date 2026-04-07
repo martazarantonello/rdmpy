@@ -1,0 +1,15 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+  - family-names: Zarantonello
+    given-names: Marta
+    affiliation: University of Glasgow, UK
+  - family-names: Byun
+    given-names: Ji-Eun
+    affiliation: University of Glasgow, UK
+title: "rdmpy: UK Rail Incidents & Delay Propagation"
+version: 0.1.0
+doi: 10.5281/zenodo.19451962
+date-released: 2026-04-07
+url: "https://github.com/martazarantonello/rdmpy"
+license: MIT

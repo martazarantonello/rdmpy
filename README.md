@@ -1,5 +1,7 @@
 # Reconstruction of Rail Incidents & Delay Propagation in UK
 
+[![DOI](https://zenodo.org/badge/1155247420.svg)](https://doi.org/10.5281/zenodo.19451961)
+
 This toolkit integrates train schedules, incident and delay records from the UK’s [Rail Data Marketplace](https://raildata.org.uk/) to link together key variables of day-to-day rail operations. Our goal is to build a unified dataset that connects **system-level performance** (network-wide delays and cancellations) with **component-level events** (locations and durations of initial incidents, train movements, delay occurrences at stations, and passenger crowding).
 
 This is one of the first efforts to generate a comprehensive dataset suitable for **validation of system-level rail models**, addressing a long-standing gap in **data availability for systems engineering**. Moving forward, expanding this work will require the integration of broader and more diverse data sources to capture the full complexity of rail-system behaviour. Future research should therefore focus on combining complementary datasets, improving data coverage and granularity, and exploring new forms of data that can enrich system-level understanding. Such efforts will help establish a more holistic and robust foundation for modelling, analysis, and decision-support across the rail domain.
